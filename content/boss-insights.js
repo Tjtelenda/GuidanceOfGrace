@@ -1,0 +1,12 @@
+export const BOSS_INSIGHTS = {
+  'Godrick the Grafted': { weakness:'His openings are safer after large axe swings and during long recovery animations.', tip:'Fire and posture pressure are broadly effective early-game options.', exploit:'Spirit summons and Nepheli can split his attention if you want a gentler first clear.' },
+  'Starscourge Radahn': { weakness:'Scarlet Rot is unusually effective if you already have access to it.', tip:'The battlefield summon signs can be reused after allies fall.', exploit:'You can treat the fight like a raid and keep re-summoning festival allies rather than forcing a solo damage race.' },
+  'Rykard, Lord of Blasphemy': { weakness:'The weapon provided in the arena is designed specifically for this fight.', tip:'Upgrade is optional; its special moves gain huge range here.', exploit:'Repeated high-stagger weapon-skill pressure can make the encounter much easier.' },
+  'Fire Giant': { weakness:'His damaged ankle is the intended early weak point.', tip:'Stay patient around large area attacks; Torrent is useful for repositioning, not constant combat.', exploit:'Percentage-based damage effects can help against the enormous health pool.' },
+  'Maliketh, the Black Blade': { weakness:'His second phase has very short recovery windows; positioning matters more than greed.', tip:'A specific optional item from Bernahl’s late route can parry certain golden attacks.', exploit:'Pillars can break line of sight and buy healing space.' },
+  'Messmer the Impaler': { weakness:'Bleed and Frost remain useful if your build can apply them consistently.', tip:'Several long combos end with distinct punish windows; learning the final hit matters more than trading.', exploit:'NPC and Spirit Ash support can spread his aggression if you want to reduce execution pressure.' },
+  'Bayle the Dread': { weakness:'His head is a high-value target, but safe damage matters more than forcing it.', tip:'Igon’s summon is both mechanically useful and part of the intended story experience.', exploit:'Dragon-Hunter’s Great Katana is an especially strong purpose-built option if you found it.' },
+  'Radahn, Consort of Miquella': { weakness:'Defensive stability and Holy mitigation become increasingly valuable later in the fight.', tip:'Do not judge readiness from Rune Level alone; Scadutree Blessing has an enormous effect here.', exploit:'High-guard shield setups can dramatically lower the mechanical burden if you want a less execution-heavy clear.' },
+};
+
+export const bossInsight = name => BOSS_INSIGHTS[name] ?? null;

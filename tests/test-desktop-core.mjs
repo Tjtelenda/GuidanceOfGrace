@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import { DEFAULT_DESKTOP_SETTINGS, dialogueRule, diffSnapshot, evidenceConfidence, isGameProcess, normalizeDesktopSettings, readinessLabel, roleNote, shouldNotify } from '../desktop/core.js';
+
+assert.equal(normalizeDesktopSettings({ multiplayerRole:'host' }).multiplayerRole,'host');
+assert.equal(normalizeDesktopSettings({ playMode:'single' }).playMode,'single');
+assert.equal(normalizeDesktopSettings({ playMode:'anything' }).playMode,'seamless');
+assert.equal(normalizeDesktopSettings({ multiplayerRole:'anything' }).multiplayerRole,'joiner');
+assert.equal(normalizeDesktopSettings({ minimizeToTray:false }).keepRunningInBackground,false,'legacy background setting should migrate');
+assert.equal(normalizeDesktopSettings({ selectedSlot:11 }).selectedSlot,null);
+assert.equal(isGameProcess('ELDENRING.EXE'),true);
+assert.equal(isGameProcess('ersc_launcher.exe'),true);
+assert.equal(isGameProcess('notepad.exe'),false);
+assert.equal(evidenceConfidence('joiner','world'),'cautious');
+assert.equal(evidenceConfidence('joiner','grace'),'medium');
+assert.equal(evidenceConfidence('host','world'),'strong');
+assert.equal(evidenceConfidence('joiner','world','single'),'strong');
+assert.equal(dialogueRule('single','joiner'),null);
+assert.match(dialogueRule('seamless','joiner').text,/Story Host/i);
+assert.match(roleNote('joiner','seamless'),/NPC talk events/i);
+assert.deepEqual(diffSnapshot({flags:{a:false},mapName:'A',lastRestedGrace:1},{flags:{a:true,b:false},mapName:'B',lastRestedGrace:2}),{changed:['a','currentMap','lastRestedGrace'],firstRead:false});
+assert.equal(readinessLabel(20,{min:30,max:40}).state,'under');
+assert.equal(readinessLabel(35,{min:30,max:40}).state,'ready');
+assert.equal(shouldNotify({warnings:[{level:'warning'}],areaNpcCount:0,settings:DEFAULT_DESKTOP_SETTINGS}),'warning');
+assert.equal(shouldNotify({warnings:[],areaNpcCount:2,settings:{...DEFAULT_DESKTOP_SETTINGS,autoShowAreaNpcs:true}}),'area');
+console.log('PASS: single/co-op settings, Story Host rules, host/joiner confidence, game detection, save diffs, readiness, and overlay notification rules.');

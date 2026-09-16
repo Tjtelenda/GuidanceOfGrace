@@ -1,0 +1,9 @@
+{
+  "name": "Guidance of Grace",
+  "short_name": "Grace Guide",
+  "description": "Spoiler-light Elden Ring Seamless Co-op companion",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b0d0b",
+  "theme_color": "#0b0d0b"
+}

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+release/
+*.co2
+*.sl2
+*.bak
+*.dmp
+*.log
+desktop-settings.json
+.DS_Store
+Thumbs.db

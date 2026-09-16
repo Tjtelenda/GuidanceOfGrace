@@ -1,0 +1,10 @@
+import fs from 'node:fs/promises';
+const SOURCE='https://raw.githubusercontent.com/BuLEEto/ER_Boss_Kill_Checklist/main/bosses.json';
+const response=await fetch(SOURCE,{headers:{'user-agent':'Guidance-of-Grace-catalog-sync'}});
+if(!response.ok)throw new Error(`Catalog download failed: ${response.status}`);
+const regions=await response.json();
+const bosses=regions.flatMap(region=>(region.bosses??[]).map(boss=>({region:region.region_name,name:boss.boss,place:boss.place||'',flagId:boss.flag_id,mainStory:Boolean(boss.main_story),remembrance:Boolean(boss.rememberance),greatRune:Boolean(boss.great_rune)})));
+if(bosses.length<150)throw new Error(`Catalog unexpectedly small (${bosses.length})`);
+const text=`// Generated from ${SOURCE}\n// Source project MIT licensed. Do not edit by hand.\nexport const GENERATED_BOSSES=${JSON.stringify(bosses,null,2)};\n`;
+await fs.writeFile(new URL('../content/generated-bosses.js',import.meta.url),text);
+console.log(`Wrote ${bosses.length} boss encounters.`);

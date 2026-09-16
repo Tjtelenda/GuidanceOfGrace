@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d0b">
+  <meta name="description" content="A spoiler-light Elden Ring Seamless Co-op companion that reads save progress locally and helps a group explore at the new player's pace.">
+  <title>Guidance of Grace</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <header class="topbar">
+    <button class="brand reset-button" data-view="home" aria-label="Guidance of Grace home">
+      <span class="brand-mark">✦</span>
+      <span><strong>Guidance of Grace</strong><small>spoiler-light co-op companion</small></span>
+    </button>
+    <div class="top-actions">
+      <label class="profile-picker"><span>View</span><select id="profileSelect" aria-label="Current profile"></select></label>
+      <label class="spoiler-picker"><span>Spoilers</span><select id="spoilerSelect" aria-label="Spoiler detail"><option value="low">Low</option><option value="balanced">Balanced</option><option value="full">Full guide</option></select></label>
+      <button id="saveButton" class="button primary">Connect save</button>
+      <input id="saveInput" type="file" accept=".co2,.sl2" hidden>
+    </div>
+  </header>
+
+  <main>
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab active" data-view="home">Compass</button>
+      <button class="tab" data-view="map">Map</button>
+      <button class="tab" data-view="quests">NPC threads</button>
+      <button class="tab" data-view="check">Before we move on</button>
+      <button class="tab" data-view="session">Tonight</button>
+      <button class="tab hidden" data-view="mending">Mending Paths</button>
+      <button class="tab" data-view="ledger">Journey Ledger</button>
+      <button class="tab" data-view="search">Search</button>
+      <button class="tab" data-view="story">Books of Knowledge</button>
+      <button class="tab" data-view="profiles">Profiles & sync</button>
+      <button class="tab desktop-only hidden" data-view="desktop">App settings</button>
+    </nav>
+
+    <section id="home" class="view active">
+      <div class="hero panel">
+        <div>
+          <p class="eyebrow">CURRENT READ</p>
+          <h1 id="heroTitle">You’re doing fine.</h1>
+          <p id="heroSummary" class="lede">Connect a Seamless Co-op save and I’ll keep the guidance intentionally light.</p>
+          <div class="status-row">
+            <span id="areaChip" class="chip">No save connected</span>
+            <span id="riskChip" class="chip safe">No urgent lockout detected</span>
+          </div>
+        </div>
+        <div class="character-card">
+          <span class="rune">ᚱ</span>
+          <div><small>CONNECTED CHARACTER</small><strong id="characterName">Not selected</strong><span id="characterMeta">Choose a .co2 file to begin</span></div>
+        </div>
+      </div>
+
+      <section id="recentPanel" class="recent panel hidden">
+        <div><p class="eyebrow">SINCE YOUR LAST UPDATE</p><h2>What changed</h2></div>
+        <div id="recentChanges" class="change-list"></div>
+      </section>
+
+      <section id="transitionPanel" class="transition-panel panel hidden" aria-live="polite">
+        <div id="transitionWarnings"></div>
+      </section>
+
+      <section id="forgePanel" class="panel forge-panel hidden"><div><p class="eyebrow">FORGE SUPPLY</p><h2>Permanent upgrade sources within reach</h2><p id="forgeSummary" class="muted-copy"></p></div><div id="forgeReachable" class="forge-reachable"></div></section>
+
+      <section class="section-block">
+        <div class="section-heading"><div><p class="eyebrow">CHOOSE YOUR OWN DIRECTION</p><h2>What sounds helpful?</h2></div><p>Nothing here forces a route. Open only what you want.</p></div>
+        <div id="branchGrid" class="branch-grid"></div>
+      </section>
+
+      <section id="guidancePanel" class="guidance panel hidden" aria-live="polite">
+        <div class="guidance-head"><div><p id="guidanceLabel" class="eyebrow"></p><h2 id="guidanceTitle"></h2></div><button id="closeGuidance" class="icon-button" aria-label="Close guidance">×</button></div>
+        <p id="guidanceText"></p>
+        <div id="hintStack" class="hint-stack"></div>
+      </section>
+
+      <section class="two-col section-block">
+        <div class="panel quiet"><p class="eyebrow">YOUR PACE</p><h2>Designed not to overwhelm</h2><p>Only a few choices are surfaced at once. The map and complete NPC tracker stay separate until you ask for them.</p></div>
+        <div class="panel sync-card"><p class="eyebrow">SAVE SYNC</p><h2 id="syncTitle">Waiting for a save</h2><p id="syncText">The file is read locally in your browser and is never modified or uploaded.</p><button id="syncAgain" class="text-button">Select save file →</button></div>
+      </section>
+    </section>
+
+    <section id="map" class="view">
+      <div class="section-heading page-heading"><div><p class="eyebrow">THE LANDS BETWEEN</p><h1>Discovery map</h1></div><p>Reached regions are highlighted from save evidence. Unconfirmed regions stay muted rather than being treated as missing.</p></div>
+      <div class="map-layer-tabs"><button class="button ghost active" data-map-layer="base">Lands Between</button><button class="button ghost" data-map-layer="shadow">Realm of Shadow</button></div>
+      <div class="map-layout">
+        <div class="map-shell panel">
+          <div class="map-canvas" id="mapCanvas">
+            <img id="worldMap" alt="Elden Ring Lands Between world map" referrerpolicy="no-referrer">
+            <div id="mapPins" class="map-pins"></div>
+          </div>
+          <p id="mapCredit" class="credit"></p>
+        </div>
+        <aside id="mapInspector" class="panel map-inspector"><p class="eyebrow">SELECT A REGION</p><h2>Pick a map marker</h2><p>Markers use save evidence where possible. They are guidance, not a claim that every location in that region has been cleared.</p></aside>
+      </div>
+    </section>
+
+    <section id="quests" class="view">
+      <div class="section-heading page-heading"><div><p class="eyebrow">SIDE STORIES · SECOND-SCREEN TRACKER</p><h1>NPC threads</h1></div><p>Keep this open on a second monitor while you play. Completed checkpoints become the story-so-far checklist; future checkpoints stay veiled until they are relevant.</p></div>
+      <article id="questDialogueNotice" class="panel transition-warning note hidden"></article>
+      <div class="quest-tools">
+        <input id="questSearch" type="search" placeholder="Find an NPC or region…" aria-label="Search NPC threads">
+        <label><input id="unfinishedOnly" type="checkbox"> Unfinished only</label>
+        <label><input id="relevantOnly" type="checkbox" checked> Current threads only</label>
+      </div>
+      <div id="questList" class="quest-list"></div>
+    </section>
+
+    <section id="check" class="view">
+      <div class="section-heading page-heading"><div><p class="eyebrow">SAFETY CHECK</p><h1>Before we move on</h1></div><p>A short check for things worth considering before the group pushes the main story.</p></div>
+      <div id="checkList" class="check-list"></div>
+    </section>
+
+    <section id="session" class="view">
+      <div class="section-heading page-heading"><div><p class="eyebrow">YOUR PACE</p><h1>What should we do tonight?</h1></div><p>Three choices, not thirty. Built around the current character and the time you actually have.</p></div>
+      <div class="session-toolbar panel"><label>How much time do you have?<select id="sessionTime"><option value="30">About 30 minutes</option><option value="60">About 1 hour</option><option value="90">About 90 minutes</option><option value="120">About 2 hours</option><option value="180">3+ hours</option></select></label></div>
+      <div id="sessionCards" class="session-grid"></div>
+      <div class="panel pace-panel"><div><p class="eyebrow">GROUP RULE</p><h2>Let discovery set the speed</h2></div><p>When one player knows the route, the default is to follow rather than lead. Use a direct hint only when the explorer asks, or when a real lockout is approaching.</p></div>
+    </section>
+
+    <section id="mending" class="view"></section>
+
+    <section id="ledger" class="view">
+      <div class="section-heading page-heading"><div><p class="eyebrow">WAYFARER’S RECORD</p><h1>Journey Ledger</h1></div><p>The bundled ledger contains the verified 207-encounter base-game + Shadow of the Erdtree catalog and derives boss-bearing dungeons, gaols, evergaols and legacy areas from the same source.</p></div>
+      <div id="ledgerStats" class="status-row"></div>
+      <div id="ledgerList" class="ledger-list"></div>
+    </section>
+
+
+    <section id="search" class="view">
+      <div class="section-heading page-heading"><div><p class="eyebrow">ARCHIVE INDEX</p><h1>Search everything you know</h1></div><p>Search NPCs, bosses, dungeons, evergaols, key items, bell bearings, upgrade tiers and unlocked story records. “Show all” deliberately disables progression hiding for planning and lookup.</p></div>
+      <section class="panel search-toolbar"><input id="knowledgeSearch" type="search" placeholder="Try: smithing stone 3, bell bearing, Alecto, tunnel, Ranni…" aria-label="Search Guidance of Grace"><label><input id="showAllKnowledge" type="checkbox"> Show all content, including undiscovered entries</label><span id="searchCount" class="chip"></span></section>
+      <div id="knowledgeResults" class="knowledge-results"></div>
+    </section>
+
+    <section id="story" class="view">
+      <div class="section-heading page-heading"><div><p class="eyebrow">THE BOOKS OF KNOWLEDGE</p><h1>Story, characters & interpretation</h1></div><p>Chapters unlock from your save. Official material and community deep dives are linked only when their spoiler level is appropriate; future revelations remain veiled.</p></div>
+      <div id="storyStatus" class="panel story-status"></div>
+      <div id="storyBeats" class="story-beats section-block"></div>
+      <div class="two-col section-block">
+        <section class="panel lore-panel"><p class="eyebrow">CHARACTER & CONCEPT GLOSSARY</p><h2>People, places & ideas you have encountered</h2><input id="glossarySearch" type="search" placeholder="Search unlocked names…"><div id="glossaryList" class="glossary-list"></div></section>
+        <section class="panel lore-panel"><p class="eyebrow">INTERPRETATION</p><h2>Theories unlocked so far</h2><div id="theoryList" class="theory-list"></div></section>
+      </div>
+      <section class="panel lore-panel section-block"><p class="eyebrow">ILLUMINATED RECORDS</p><h2>Official scenes, trailers & community deep dives</h2><p class="muted-copy">Nothing autoplays. Official game movie files are never redistributed; the desktop app can open your own installed movie archive when available.</p><div id="storyVideos" class="video-list"></div><div class="button-row desktop-only hidden"><button id="openGameMovies" class="button ghost">Open installed cutscene archive</button></div></section>
+    </section>
+
+    <section id="profiles" class="view">
+      <div class="section-heading page-heading"><div><p class="eyebrow">CAMPAIGN</p><h1>Profiles, journeys & sync</h1></div><p>Each desktop journey is saved in its own .grace file, so Single Player and Seamless campaigns can keep completely separate companion progress without touching the Elden Ring save.</p></div>
+      <section id="journeyPanel" class="panel desktop-only hidden"><div class="section-heading"><div><p class="eyebrow">COMPANION JOURNEYS</p><h2>Switch campaigns</h2></div><p id="journeyStatus" class="muted-copy"></p></div><div class="journey-controls"><select id="journeySelect"></select><button id="newSingleJourney" class="button ghost">New Single Player</button><button id="newSeamlessJourney" class="button ghost">New Seamless</button><button id="importJourney" class="text-button">Import .grace</button><button id="exportJourney" class="text-button">Export current</button></div></section>
+      <div id="profileCards" class="profile-grid"></div>
+
+      <div class="sync-grid section-block">
+        <section class="panel sync-box">
+          <p class="eyebrow">LOCAL BACKUP</p><h2>Move the tracker without a server</h2><p>Export the companion state as JSON, or import one you previously exported. This contains derived progress and manual checks, not the game save.</p>
+          <div class="button-row"><button id="exportState" class="button ghost">Export tracker</button><button id="importStateButton" class="button ghost">Import tracker</button><input id="importStateInput" type="file" accept="application/json,.json" hidden></div>
+        </section>
+        <section class="panel sync-box">
+          <p class="eyebrow">SHARED CAMPAIGN</p><h2 id="cloudHeading">Cloud sync is ready to configure</h2><p id="cloudStatusText">Work can attach a Supabase project to enable magic-link accounts and shared campaign state.</p>
+          <div id="cloudAuth" class="cloud-stack">
+            <label>Email<input id="cloudEmail" type="email" autocomplete="email" placeholder="you@example.com"></label>
+            <button id="sendMagicLink" class="button ghost">Send sign-in link</button>
+          </div>
+          <div id="cloudControls" class="cloud-stack hidden">
+            <div class="signed-in">Signed in as <strong id="cloudUser"></strong> <button id="cloudSignOut" class="text-button">Sign out</button></div>
+            <div class="cloud-columns">
+              <label>New campaign<input id="campaignName" maxlength="80" placeholder="Friday Night Elden Ring"></label>
+              <button id="createCampaign" class="button ghost">Create</button>
+              <label>Invite code<input id="inviteCode" maxlength="10" placeholder="AB12CD34EF"></label>
+              <button id="joinCampaign" class="button ghost">Join</button>
+            </div>
+            <label>Campaign<select id="campaignSelect"><option value="">Choose a campaign</option></select></label>
+            <div class="button-row"><button id="pushCloud" class="button primary">Sync my profile</button><button id="refreshCloud" class="button ghost">Refresh campaign</button></div>
+            <div id="remoteProfiles" class="remote-profiles"></div>
+          </div>
+          <p id="cloudMessage" class="form-message" aria-live="polite"></p>
+        </section>
+      </div>
+    </section>
+
+    <section id="desktop" class="view">
+      <div class="section-heading page-heading"><div><p class="eyebrow">LOCAL COMPANION</p><h1>Overlay & game integration</h1></div><p>The desktop build watches saves read-only and never injects into Elden Ring. Settings here apply only to this computer.</p></div>
+      <div class="settings-grid">
+        <section class="panel settings-card"><p class="eyebrow">PLAY STYLE</p><h2>Single Player or Seamless</h2><label>Mode<select id="desktopPlayMode"><option value="single">Single Player</option><option value="seamless">Seamless Co-op</option></select></label><div id="desktopRoleWrap"><label>Story role<select id="desktopRole"><option value="host">Story Host</option><option value="joiner">Joiner</option></select></label></div><p id="roleExplanation" class="muted-copy"></p><p class="muted-copy">In Seamless, NPC talk events and progression are synchronized. Joiners should let the Story Host initiate important NPC dialogue first.</p></section>
+        <section class="panel settings-card"><p class="eyebrow">OVERLAY</p><h2>In-game shortcuts</h2><label><input id="overlayEnabled" type="checkbox"> Enable overlay</label><label>Guidance shortcut<input id="overlayHotkey" type="text" placeholder="CommandOrControl+Shift+G"></label><label>Map / pinned-location shortcut<input id="mapOverlayHotkey" type="text" placeholder="CommandOrControl+Shift+M"></label><label><input id="autoShowWarnings" type="checkbox"> Pop up for progression warnings</label><label><input id="autoShowAreaNpcs" type="checkbox"> Pop up when relevant NPCs are available in this area</label><div class="button-row"><button id="previewOverlay" class="button ghost">Preview guidance</button><button id="previewMapOverlay" class="button ghost">Preview map pin</button></div><p class="muted-copy">The map view remains an external overlay in both modes. Guidance of Grace does not hook Elden Ring’s map key or inject a DLL.</p></section>
+        <section class="panel settings-card"><p class="eyebrow">SAVE WATCHER</p><h2>Character profile</h2><p id="desktopSavePath" class="path-copy">Auto-detecting save…</p><label>Character<select id="desktopSlot"></select></label><label>Scadutree Blessing<input id="scaduLevel" type="number" min="0" max="20" step="1" placeholder="Reading from save…"></label><p id="scaduHelp" class="muted-copy">Guidance of Grace reads Scadutree and Revered Spirit Ash blessing levels directly from the character slot when the dynamic marker is available. Manual entry is only a fallback.</p><div class="button-row"><button id="chooseDesktopSave" class="button ghost">Choose save</button><button id="refreshDesktopSave" class="button ghost">Read now</button></div></section>
+        <section class="panel settings-card"><p class="eyebrow">GAME LIFECYCLE</p><h2>Start and stop with Elden Ring</h2><label><input id="wakeWithGame" type="checkbox"> Wake when Elden Ring / Seamless starts</label><label><input id="closeAfterGame" type="checkbox"> Close after the final save read when the game exits</label><label><input id="keepRunningInBackground" type="checkbox"> Keep running in the background when the window closes</label><label><input id="startWithWindows" type="checkbox"> Start quietly with Windows</label></section>
+        <section class="panel settings-card"><p class="eyebrow">LAUNCHERS</p><h2>Open game + companion together</h2><p id="gamePathStatus" class="muted-copy">Looking for your Steam install…</p><div class="button-row"><button id="launchSeamless" class="button primary">Launch Seamless</button><button id="launchVanilla" class="button ghost">Launch vanilla</button></div><div class="button-row"><button id="chooseSeamless" class="text-button">Choose ersc_launcher.exe</button><button id="chooseVanilla" class="text-button">Choose game launcher</button></div><div class="button-row"><button id="shortcutSeamless" class="text-button">Create Seamless desktop shortcut</button><button id="shortcutVanilla" class="text-button">Create vanilla shortcut</button></div></section>
+        <section class="panel settings-card"><p class="eyebrow">UPDATES</p><h2>App + knowledge</h2><label><input id="checkForUpdates" type="checkbox"> Check GitHub Releases automatically</label><label><input id="autoDownloadUpdates" type="checkbox"> Download app updates automatically</label><label><input id="knowledgeAutoUpdate" type="checkbox"> Refresh licensed knowledge sources automatically</label><p id="updateStatus" class="muted-copy">App update status unavailable in the browser build.</p><p id="knowledgeStatus" class="muted-copy">Knowledge snapshot is bundled for offline use.</p><div class="button-row"><button id="checkUpdates" class="button ghost">Check app update</button><button id="checkKnowledge" class="button ghost">Refresh knowledge</button><button id="importKnowledge" class="button ghost">Import game-data index</button><button id="installUpdate" class="button primary hidden">Install downloaded update</button></div></section>
+      </div>
+    </section>
+  </main>
+
+
+  <dialog id="journeyDialog">
+    <form method="dialog" class="dialog-card journey-dialog-card">
+      <p class="eyebrow">CHOOSE A JOURNEY</p><h2>Which companion save are you playing?</h2><p>Guidance of Grace keeps Single Player and Seamless companion state separate. Elden Ring saves remain read-only.</p>
+      <div id="journeyChoices" class="character-choices"></div>
+      <div class="button-row"><button type="button" id="journeyCreateSingle" class="button ghost">New Single Player</button><button type="button" id="journeyCreateSeamless" class="button ghost">New Seamless</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="characterDialog">
+    <form method="dialog" class="dialog-card">
+      <p class="eyebrow">SAVE FOUND</p><h2>Which character belongs to this profile?</h2><p>The same save can contain several character slots. Nothing is written back to it.</p>
+      <div id="characterChoices" class="character-choices"></div>
+      <button class="button ghost" value="cancel">Cancel</button>
+    </form>
+  </dialog>
+
+  <footer><span>Guidance of Grace</span><span>Read-only save companion · artwork credits in THIRD_PARTY_NOTICES.md</span></footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

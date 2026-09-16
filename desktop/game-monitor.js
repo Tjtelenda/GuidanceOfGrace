@@ -13,15 +13,16 @@ export async function listWindowsProcesses() {
 }
 
 export class GameMonitor {
-  constructor(onChange, intervalMs = 2000) {
+  constructor(onChange, intervalMs = 2000, listProcesses = listWindowsProcesses) {
     this.onChange = onChange;
     this.intervalMs = intervalMs;
     this.running = false;
     this.timer = null;
+    this.listProcesses=listProcesses;
   }
 
   async poll() {
-    const processes = await listWindowsProcesses();
+    const processes = await this.listProcesses();
     const nowRunning = processes.some(isGameProcess);
     if (nowRunning !== this.running) {
       this.running = nowRunning;

@@ -15,21 +15,30 @@ const BLESSING_MAGIC = new Uint8Array([
 const SCADUTREE_FROM_MAGIC = -187;
 const REVERED_SPIRIT_FROM_MAGIC = -186;
 
-function findBytes(haystack, needle){
-  outer: for(let i=0;i<=haystack.length-needle.length;i++){
-    for(let j=0;j<needle.length;j++)if(haystack[i+j]!==needle[j])continue outer;
-    return i;
+export function playerGameDataOffset(bytes, slotIndex){
+  if(!(bytes instanceof Uint8Array)||!Number.isInteger(slotIndex)||slotIndex<0||slotIndex>=10)return null;
+  const base=SLOT_BASE+slotIndex*SLOT_STRIDE+SLOT_DATA_OFFSET,end=base+SLOT_DATA_SIZE;
+  if(end>bytes.length)return null;
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  let offset=base+32;
+  for(let i=0;i<0x1400;i++){
+    if(offset+8>end)return null;
+    const handle=view.getUint32(offset,true),type=(handle&0xf0000000)>>>0;
+    offset+=8;
+    if(handle&&type!==0xc0000000){offset+=8;if(type===0x80000000)offset+=5;}
   }
-  return -1;
+  return offset+432<=end?offset:null;
 }
 
 export function readBlessingLevels(bytes, slotIndex){
-  const base=SLOT_BASE+slotIndex*SLOT_STRIDE+SLOT_DATA_OFFSET;
-  if(base<0||base+SLOT_DATA_SIZE>bytes.length)return {scaduLevel:null,spiritBlessingLevel:null};
-  const slot=bytes.subarray(base,base+SLOT_DATA_SIZE),magic=findBytes(slot,BLESSING_MAGIC);
-  if(magic<187)return {scaduLevel:null,spiritBlessingLevel:null};
-  const scadu=slot[magic+SCADUTREE_FROM_MAGIC],spirit=slot[magic+REVERED_SPIRIT_FROM_MAGIC];
-  return {scaduLevel:scadu<=20?scadu:null,spiritBlessingLevel:spirit<=10?spirit:null};
+  const unknown={scaduLevel:null,spiritBlessingLevel:null},player=playerGameDataOffset(bytes,slotIndex);
+  if(player===null)return unknown;
+  const magic=player+431;
+  if(!BLESSING_MAGIC.every((byte,i)=>bytes[magic+i]===byte))return unknown;
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),level=view.getUint32(player+0x60,true);
+  if(level<1||level>713)return unknown;
+  const scadu=bytes[magic+SCADUTREE_FROM_MAGIC],spirit=bytes[magic+REVERED_SPIRIT_FROM_MAGIC];
+  return scadu<=20&&spirit<=10?{scaduLevel:scadu,spiritBlessingLevel:spirit}:unknown;
 }
 
 // Curated subset of the public ER event-flag BST. The table values and save
@@ -57,7 +66,7 @@ function u32(view, offset) {
 }
 
 function cleanName(bytes) {
-  return new TextDecoder('utf-16le').decode(bytes).replaceAll('\0', '').trim();
+  return new TextDecoder('utf-16le').decode(bytes).split('\0')[0].trim();
 }
 
 function profileLayout(view, offset) {

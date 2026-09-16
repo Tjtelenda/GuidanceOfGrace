@@ -1,6 +1,6 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { normalizeDesktopSettings } from './core.js';
+import { atomicJson, readJson } from './atomic-store.js';
 
 export class SettingsStore {
   constructor(userDataPath) {
@@ -9,16 +9,16 @@ export class SettingsStore {
   }
 
   load() {
-    try { return normalizeDesktopSettings(JSON.parse(fs.readFileSync(this.file, 'utf8'))); }
+    try { return normalizeDesktopSettings(readJson(this.file) ?? {}); }
     catch { return normalizeDesktopSettings(); }
   }
 
   get() { return { ...this.settings }; }
 
   set(patch) {
-    this.settings = normalizeDesktopSettings({ ...this.settings, ...patch });
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    fs.writeFileSync(this.file, JSON.stringify(this.settings, null, 2));
+    const next = normalizeDesktopSettings({ ...this.settings, ...patch });
+    atomicJson(this.file, next);
+    this.settings=next;
     return this.get();
   }
 }

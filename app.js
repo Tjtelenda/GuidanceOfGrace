@@ -1,5 +1,6 @@
+import { planSession } from './content/session-planner.js';
 import { parseSave, formatPlaytime } from './save-parser.js';
-import { QUESTS, BRANCHES, REGIONS, MAP_IMAGE, FLAG_LABELS, TRANSITION_RISKS, getStage, getTransitionRisk, questAvailable } from './data.js';
+import { QUESTS, BRANCHES, REGIONS, FLAG_LABELS, TRANSITION_RISKS, getStage, getTransitionRisk, questAvailable } from './data.js';
 import { cloudStatus, consumeAuthRedirect, loadUser, sendMagicLink, signOut, createCampaign, joinCampaign, listCampaigns, setCampaign, pushProfile, fetchCampaign } from './cloud.js';
 import { AREA_RECOMMENDATIONS, BOSS_RECOMMENDATIONS, recommendationForMap } from './content/recommendations.js';
 import { STORY_BEATS, unlockedStory, GLOSSARY, THEORY_CARDS, STORY_VIDEOS, glossaryById } from './content/story-data.js';
@@ -8,7 +9,7 @@ import { readinessLabel, roleNote, evidenceConfidence, dialogueRule } from './de
 import { ENDING_PATHS, endingPriority, endingWarning, mendingPathsVisible, pathStatus } from './content/mending-paths.js';
 import { bossInsight } from './content/boss-insights.js';
 import { GENERATED_BOSSES, GENERATED_BOSSES_SNAPSHOT } from './content/generated-bosses.js';
-import { classifyBossLocation, deriveEncounterLocations, COMPLETION_CATALOG_SOURCE } from './content/completion-catalog.js';
+import { classifyBossLocation, deriveEncounterLocations } from './content/completion-catalog.js';
 import { FORGE_SUPPLY, reachableForgeSupply } from './content/forge-supply.js';
 import { buildKnowledgeIndex, searchKnowledge } from './content/knowledge-index.js';
 
@@ -28,15 +29,15 @@ let desktopSettings = null;
 let desktopGameRunning = false;
 let mapLayer = 'base';
 let mapFocus = null;
+let renderedLocalTarget=null;
 let overlayMapTarget = null;
 let activeJourneyId = null;
+let switchingJourney=false;
+let encounterCatalog=GENERATED_BOSSES;
 let journeyList = [];
-let journeySaveTimer = null;
 let journeyDialogResolve = null;
-let suppressJourneySave = false;
 let supplementalKnowledge = [];
-const ENCOUNTER_LOCATIONS = deriveEncounterLocations(GENERATED_BOSSES);
-const KNOWLEDGE_INDEX = buildKnowledgeIndex({bosses:GENERATED_BOSSES,quests:QUESTS,forgeSupply:FORGE_SUPPLY,storyBeats:STORY_BEATS,glossary:GLOSSARY,questItems:QUEST_ITEM_LINKS});
+let KNOWLEDGE_INDEX = buildKnowledgeIndex({bosses:GENERATED_BOSSES,quests:QUESTS,forgeSupply:FORGE_SUPPLY,storyBeats:STORY_BEATS,glossary:GLOSSARY,questItems:QUEST_ITEM_LINKS});
 const saveHandles = [null,null,null];
 
 function cleanCharacter(raw){
@@ -49,7 +50,7 @@ function cleanProfile(raw={},fallback=defaultProfile('Tarnished','Guide')){
   const quest={};
   if(raw.quest&&typeof raw.quest==='object') for(const q of QUESTS){const v=raw.quest[q.id];if(Array.isArray(v))quest[q.id]=[...new Set(v.filter(n=>Number.isInteger(n)&&n>=0&&n<q.steps.length))].sort((a,b)=>a-b)}
   const c=cleanCharacter(raw.character),ledger={};
-  if(raw.ledger&&typeof raw.ledger==='object')for(const [key,value] of Object.entries(raw.ledger))if(value===true&&/^\d+$/.test(key))ledger[key]=true;
+  if(raw.ledger&&typeof raw.ledger==='object')for(const [key,value] of Object.entries(raw.ledger))if(typeof value==='boolean'&&/^\d+$/.test(key))ledger[key]=value;
   return {
     name:typeof raw.name==='string'&&raw.name.trim()?raw.name.trim().slice(0,60):fallback.name,
     mode:MODES.has(raw.mode)?raw.mode:fallback.mode,
@@ -60,6 +61,9 @@ function cleanProfile(raw={},fallback=defaultProfile('Tarnished','Guide')){
     sessionMinutes:[30,60,90,120,180].includes(raw.sessionMinutes)?raw.sessionMinutes:90,
     spoiler:SPOILERS.has(raw.spoiler)?raw.spoiler:fallback.spoiler,
     showAll:Boolean(raw.showAll),
+    savePath:typeof raw.savePath==='string'?raw.savePath:'',
+    pinnedTarget:raw.pinnedTarget&&typeof raw.pinnedTarget==='object'?raw.pinnedTarget:null,
+    tracked:Array.isArray(raw.tracked)?raw.tracked.filter(x=>typeof x==='string').slice(0,200):[],
     quest,
     ledger,
     character:c,
@@ -81,13 +85,15 @@ function loadState(){
     return result;
   }catch{return defaultState()}
 }
-function saveState(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state));if(!suppressJourneySave&&activeJourneyId&&window.guidanceDesktop?.isDesktop){clearTimeout(journeySaveTimer);journeySaveTimer=setTimeout(()=>void window.guidanceDesktop.saveJourney(activeJourneyId,state,{playMode:profile().playMode}).catch(()=>{}),250)}}
+function saveState(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state));if(!switchingJourney&&activeJourneyId&&window.guidanceDesktop?.isDesktop)void window.guidanceDesktop.saveJourney(activeJourneyId,state,{playMode:profile().playMode}).catch(error=>{$('#journeyStatus').textContent=`Journey could not be saved: ${error.message}`})}
+async function flushJourney(){if(activeJourneyId&&window.guidanceDesktop)await window.guidanceDesktop.saveJourney(activeJourneyId,state,{playMode:profile().playMode});}
+async function refreshKnowledge(){if(!window.guidanceDesktop)return;supplementalKnowledge=await window.guidanceDesktop.knowledgeCatalog();encounterCatalog=await window.guidanceDesktop.knowledgeEncounters();KNOWLEDGE_INDEX=buildKnowledgeIndex({bosses:encounterCatalog,quests:QUESTS,forgeSupply:FORGE_SUPPLY,storyBeats:STORY_BEATS,glossary:GLOSSARY,questItems:QUEST_ITEM_LINKS});}
 function profile(){return state.profiles[state.active]}
 function flags(){return profile().character?.flags??{}}
 function stage(){return getStage(flags())}
 function questDone(q,p=profile()){return new Set(p.quest[q.id]??[])}
 function regionReached(region,f=flags()){return Boolean(profile().character&&region.when(f))}
-function questRelevant(q,f=flags()){return !profile().character||questAvailable(q,f)}
+function questRelevant(q,f=flags()){return Boolean(q&&questAvailable(q,f))}
 function activeEvidence(q,f=flags()){return (q.saveEvidence??[]).filter(([key])=>Boolean(f[key]))}
 function hasStarted(q,p=profile()){return (p.quest[q.id]?.length??0)>0||activeEvidence(q,p.character?.flags??{}).length>0}
 function isComplete(q,p=profile()){return (p.quest[q.id]?.length??0)>=q.steps.length}
@@ -96,7 +102,7 @@ function riskRelevant(r,p=profile()){
   return r.questIds.some(id=>{const q=QUESTS.find(x=>x.id===id);return q&&!isComplete(q,p)});
 }
 function activeTransitionRisks(f=flags()){
-  const rank={danger:2,warn:1,note:0};
+  const rank={danger:2,warn:1,warning:1,note:0};
   return TRANSITION_RISKS.filter(r=>r.when(f)&&riskRelevant(r)).sort((a,b)=>rank[b.level]-rank[a.level]);
 }
 function esc(value=''){return String(value).replace(/[&<>'"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]))}
@@ -137,10 +143,19 @@ function mapRegionForName(value=''){
   if(/stormveil/.test(name))return 'stormveil';if(/weeping|morne/.test(name))return 'weeping';if(/liurnia|raya lucaria|caria|moonlight altar/.test(name))return 'liurnia';if(/caelid|dragonbarrow|redmane/.test(name))return 'caelid';if(/gelmir|volcano manor/.test(name))return 'gelmir';if(/leyndell|capital outskirts|ashen capital/.test(name))return 'leyndell';if(/mountaintops|forbidden lands|snowfield|haligtree|farum azula|flame peak/.test(name))return 'mountaintops';if(/siofra|ainsel|deeproot|mohgwyn|nokron/.test(name))return 'underground';if(/altus/.test(name))return 'altus';if(/limgrave|stranded graveyard/.test(name))return 'limgrave';return null;
 }
 function currentQuestStep(q){const done=questDone(q),i=q.steps.findIndex((_,index)=>!done.has(index)),index=i<0?Math.max(0,q.steps.length-1):i;return {index,step:q.steps[index]};}
-function questLocation(q){const {step}=currentQuestStep(q);return {name:q.name,location:step?.area||q.area,hint:step?.clue||q.hint,region:q.regions.find(id=>REGIONS.some(r=>r.id===id))??q.regions[0]??null};}
-function locateTarget(target){if(!target)return;mapFocus=target;overlayMapTarget=target;const region=target.region&&REGIONS.some(r=>r.id===target.region)?target.region:mapRegionForName(`${target.regionName??''} ${target.region??''} ${target.location??''}`);if(region){const model=REGIONS.find(r=>r.id===region);mapLayer=model?.mapLayer==='shadow'?'shadow':'base';activateView('map');renderMap();requestAnimationFrame(()=>inspectRegion(region));}syncOverlay();}
+function questLocation(q){const {step}=currentQuestStep(q);return {name:q.name,location:step?.area||q.area,hint:step?.clue||q.hint,region:mapRegionForName(step?.area)||q.regions.find(id=>REGIONS.some(r=>r.id===id))||q.regions[0]||null};}
+function locateTarget(target){if(!target)return;mapFocus=target;overlayMapTarget=target;profile().pinnedTarget=target;saveState();activateView('map');renderMap();void renderLocalTarget(target);const region=target.region&&REGIONS.some(r=>r.id===target.region)?target.region:mapRegionForName(`${target.regionName??''} ${target.region??''} ${target.location??''}`);if(region){const model=REGIONS.find(r=>r.id===region);mapLayer=model?.mapLayer==='shadow'?'shadow':'base';activateView('map');renderMap();requestAnimationFrame(()=>inspectRegion(region));}syncOverlay();}
+
+async function renderLocalTarget(target){
+  if(!target||!Number.isFinite(target.x)||!window.guidanceDesktop)return;
+  const crop=await window.guidanceDesktop.localMap(target);
+  if(mapFocus!==target)return;
+  $('#mapInspector').innerHTML=`<article class="map-focus"><p class="eyebrow">PINNED LOCAL LOCATION</p><h2>${esc(target.name)}</h2><p>${esc(target.location)}</p><p>${esc(target.hint)}</p><button class="text-button" data-pin-overlay>Show in overlay →</button></article>`;
+  if(crop){renderedLocalTarget=target;$('#mapPins').innerHTML=`<span class="local-target-dot" style="left:${crop.x}%;top:${crop.y}%" aria-label="Pinned target">⟡</span>`;$('#worldMap').src=crop.image;$('#mapCredit').textContent='Local game map · cropped around your requested target · no game modification';}
+}
+
 function locateQuest(id){const q=QUESTS.find(x=>x.id===id);if(q)locateTarget(questLocation(q));}
-function knowledgeVisible(item){if(profile().showAll||!profile().character)return true;if(item.type==='quest'){const q=QUESTS.find(x=>x.id===item.questId);return Boolean(q&&(questRelevant(q)||hasStarted(q)))}if(item.type==='story')return unlockedStory(flags()).some(b=>b.id===item.storyId);if(item.type==='glossary')return unlockedGlossary().some(g=>g.id===item.glossaryId);if(item.type==='forge'){const source=FORGE_SUPPLY.find(x=>x.id===item.forgeId);return Boolean(source?.when(flags()))}if(item.type==='item')return QUEST_ITEM_LINKS.some(x=>x.key===item.itemKey&&x.when(flags()));const regionId=mapRegionForName(`${item.region??''} ${item.location??''}`);const region=REGIONS.find(r=>r.id===regionId);return region?regionReached(region):false;}
+function knowledgeVisible(item){if(profile().showAll)return true;if(item.type==='encounter'&&profile().spoiler!=='full'&&!profile().character?.eventIds?.includes(item.flagId)){const query=$('#knowledgeSearch')?.value.trim().toLowerCase();if(!query||query.length<3||!item.title?.toLowerCase().includes(query))return false;}if(item.id?.startsWith('local:'))return Boolean(item.eventId&&profile().character?.eventIds?.includes(item.eventId));if(item.type==='quest'){const q=QUESTS.find(x=>x.id===item.questId);return Boolean(q&&(questRelevant(q)||hasStarted(q)))}if(item.type==='story')return unlockedStory(flags()).some(b=>b.id===item.storyId);if(item.type==='glossary')return unlockedGlossary().some(g=>g.id===item.glossaryId);if(item.type==='forge'){const source=FORGE_SUPPLY.find(x=>x.id===item.forgeId);return Boolean(source?.when(flags()))}if(item.type==='item')return QUEST_ITEM_LINKS.some(x=>x.key===item.itemKey&&x.when(flags()));const regionId=mapRegionForName(`${item.region??''} ${item.location??''}`);const region=REGIONS.find(r=>r.id===regionId);return region?regionReached(region):false;}
 function overlayPayload(){
   const c=profile().character,dialogue=dialogueRule(profile().playMode,profile().role);
   const warnings=activeTransitionRisks().slice(0,3).map(r=>({id:r.id,level:r.level==='warn'?'warning':r.level,title:r.title,text:riskText(r),questId:(r.questIds??[]).find(id=>questRelevant(QUESTS.find(q=>q.id===id)))}));
@@ -149,9 +164,9 @@ function overlayPayload(){
   const npcs=nearby.map(n=>({...n,...questLocation(QUESTS.find(q=>q.id===n.id))}));
   return {area:mapLabel(),character:c?`${c.name} · Lv ${c.level}${desktopGameRunning?' · game running':''}`:'No save connected',readiness:currentReadiness(),role:profile().playMode==='single'?'Single Player':profile().role==='host'?'Story Host':'Joiner',dialogue,hotkey:desktopSettings?.overlayHotkey,mapHotkey:desktopSettings?.mapOverlayHotkey,mapTarget:overlayMapTarget,npcs,warnings:warnings.slice(0,3),suggestions:sessionIdeas()};
 }
-function syncOverlay(){if(window.guidanceDesktop?.isDesktop&&profile().character)void window.guidanceDesktop.setOverlayPayload(overlayPayload())}
+function syncOverlay(){if(window.guidanceDesktop?.isDesktop)void window.guidanceDesktop.setOverlayPayload(overlayPayload())}
 
-function render(){renderProfiles();renderHome();renderTransitionWarnings();renderForgeSupply();renderMap();renderQuests();renderChecks();renderSession();renderMendingPaths();renderLedger();renderKnowledgeSearch();renderStory();renderDesktop();renderJourneys();syncOverlay();void renderCloud()}
+function render(){document.body.classList.toggle('show-all',profile().showAll);$('#globalShowAll').checked=profile().showAll;renderProfiles();renderHome();renderTransitionWarnings();renderForgeSupply();renderMap();renderQuests();renderChecks();renderSession();renderMendingPaths();renderLedger();renderKnowledgeSearch();renderStory();renderDesktop();renderJourneys();syncOverlay();void renderCloud()}
 function activateView(id){$$('.tab,.view').forEach(x=>x.classList.remove('active'));const tab=$(`.tab[data-view="${id}"]`);if(tab)tab.classList.add('active');$(`#${id}`)?.classList.add('active');window.scrollTo({top:0,behavior:'smooth'})}
 
 function renderProfiles(){
@@ -165,11 +180,11 @@ function renderJourneys(){
   const current=journeyList.find(j=>j.id===activeJourneyId);$('#journeyStatus').textContent=current?`Current: ${current.name} · ${current.playMode==='single'?'Single Player':'Seamless Co-op'} · saved ${new Date(current.updatedAt).toLocaleString()}`:'Choose or create a companion journey.';
 }
 async function refreshJourneys(){if(!window.guidanceDesktop?.isDesktop)return [];journeyList=await window.guidanceDesktop.listJourneys();renderJourneys();return journeyList;}
-async function loadJourney(id){if(!window.guidanceDesktop?.isDesktop||!id)return;const journey=await window.guidanceDesktop.loadJourney(id);suppressJourneySave=true;state=sanitizeState(journey.state);activeJourneyId=journey.id;localStorage.setItem(STORAGE_KEY,JSON.stringify(state));suppressJourneySave=false;desktopSettings=await window.guidanceDesktop.setSettings({activeJourneyId:journey.id,playMode:journey.playMode});profile().playMode=journey.playMode;profile().role=desktopSettings.multiplayerRole;await refreshJourneys();render();await window.guidanceDesktop.readSave().catch(()=>{});}
+async function loadJourney(id){if(!window.guidanceDesktop?.isDesktop||!id)return;await flushJourney();switchingJourney=true;try{const journey=await window.guidanceDesktop.loadJourney(id);state=sanitizeState(journey.state);activeJourneyId=journey.id;profile().playMode=journey.playMode;desktopSettings=await window.guidanceDesktop.getSettings();profile().savePath=desktopSettings.selectedSavePath;overlayMapTarget=profile().pinnedTarget;mapFocus=overlayMapTarget;pendingSave=null;localStorage.setItem(STORAGE_KEY,JSON.stringify(state));await refreshJourneys();}finally{switchingJourney=false;}render();await window.guidanceDesktop.readSave().catch(()=>{});}
 async function createJourney(playMode){const starter=defaultState();for(const p of starter.profiles)p.playMode=playMode;const name=playMode==='single'?'Single Player Journey':'Seamless Co-op Journey',journey=await window.guidanceDesktop.createJourney({name,playMode,state:starter});await refreshJourneys();await loadJourney(journey.id);$('#journeyDialog')?.close();return journey;}
 async function chooseJourneyOnLaunch(){if(!window.guidanceDesktop?.isDesktop)return;await refreshJourneys();if(!journeyList.length){const migrated=await window.guidanceDesktop.createJourney({name:profile().playMode==='single'?'Single Player Journey':'Seamless Co-op Journey',playMode:profile().playMode,state});journeyList=await window.guidanceDesktop.listJourneys();activeJourneyId=migrated.id;}
   const dialog=$('#journeyDialog'),choices=$('#journeyChoices');if(!dialog||!choices){await loadJourney(desktopSettings?.activeJourneyId||journeyList[0]?.id);return}
-  choices.innerHTML=journeyList.map(j=>`<button type="button" class="character-choice" data-journey-id="${esc(j.id)}"><strong>${esc(j.name)}</strong><span>${j.playMode==='single'?'Single Player':'Seamless Co-op'} · ${new Date(j.updatedAt).toLocaleDateString()}</span></button>`).join('');await new Promise(resolve=>{journeyDialogResolve=resolve;dialog.showModal()});
+  choices.innerHTML=journeyList.map(j=>`<button type="button" class="character-choice" data-journey-id="${esc(j.id)}"><strong>${j.id===desktopSettings?.activeJourneyId?"Continue · ":""}${esc(j.name)}</strong><span>${j.playMode==='single'?'Single Player':'Seamless Co-op'} · ${new Date(j.updatedAt).toLocaleDateString()}</span></button>`).join('');await new Promise(resolve=>{journeyDialogResolve=resolve;dialog.showModal()});
 }
 
 function renderHome(){
@@ -185,7 +200,7 @@ function renderHome(){
   $('#branchGrid').innerHTML=BRANCHES.map(b=>`<button class="branch" data-branch="${b.id}"><span class="icon">${b.icon}</span><h3>${esc(b.title)}</h3><p>${esc(b.text)}</p></button>`).join('');
   const risk=progressRisk(f);$('#riskChip').textContent=risk.text;$('#riskChip').className=`chip ${risk.level}`;
   const old=$('#readinessHome');if(old)old.remove();
-  if(c){const ready=currentReadiness(),boss=bossAhead(),rec=boss??areaRecommendation(),card=document.createElement('div'),name=boss&&p.spoiler==='full'?`Major challenge ahead: ${boss.name}`:boss?'Major challenge ahead':'Area readiness',insight=boss?bossInsight(boss.name):null;card.id='readinessHome';card.className=`readiness-card ${ready.state}`;card.innerHTML=`<strong>${esc(name)}</strong><span>${esc(ready.text)}${rec?.note?` · ${esc(rec.note)}`:''}</span>${insight?`<details class="tarnished-insight"><summary>Tarnished insight</summary><p><b>Weakness:</b> ${esc(insight.weakness)}</p><p><b>Field note:</b> ${esc(insight.tip)}</p><p><b>If you want an edge:</b> ${esc(insight.exploit)}</p></details>`:''}`;$('.character-card').append(card)}
+  if(c){const ready=currentReadiness(),boss=bossAhead(),rec=boss??areaRecommendation(),card=document.createElement('div'),name=boss&&(p.spoiler==='full'||p.showAll)?`Major challenge ahead: ${boss.name}`:boss?'Major challenge ahead':'Area readiness',insight=boss?bossInsight(boss.name):null;card.id='readinessHome';card.className=`readiness-card ${ready.state}`;card.innerHTML=`<strong>${esc(name)}</strong><span>${esc(ready.text)}${rec?.note&&(p.showAll||p.spoiler==='full')?` · ${esc(rec.note)}`:''}</span>${insight?`<details class="tarnished-insight"><summary>Whisper of Grace</summary><p><b>Weakness:</b> ${esc(insight.weakness)}</p><p><b>Field note:</b> ${esc(insight.tip)}</p><p><b>If you want an edge:</b> ${esc(insight.exploit)}</p></details>`:''}`;$('.character-card').append(card)}
   const recent=p.recentChanges??[];$('#recentPanel').classList.toggle('hidden',recent.length===0);$('#recentChanges').innerHTML=recent.map(x=>`<span class="change-pill">✓ ${esc(x)}</span>`).join('');
 }
 function progressRisk(f){
@@ -230,19 +245,14 @@ function renderForgeSupply(){
 
 function recommendation(){
   const candidates=QUESTS.filter(q=>!isComplete(q)&&questRelevant(q)).sort((a,b)=>endingPriority(b.id,profile().endingTarget)-endingPriority(a.id,profile().endingTarget)||Number(b.priority==='major')-Number(a.priority==='major')||activeEvidence(b).length-activeEvidence(a).length);
-  return candidates[0]??QUESTS.find(q=>!isComplete(q))??null;
+  return candidates[0]??null;
 }
 function sessionIdeas(){
-  const s=stage(),q=recommendation(),f=flags(),budget=profile().sessionMinutes??90;
-  const options=[
-    {title:`Wander ${s.area}`,minutes:45,text:'Pick one interesting landmark and let the new player choose the route. Stop after one satisfying discovery rather than clearing a whole region.'},
-    {title:profile().spoiler==='low'&&!hasStarted(q??{})?'Follow an NPC thread':q?`Check on ${q.name}`:'Follow an NPC thread',minutes:30,text:q?.hint??'Talk to people you have already met and follow one thread until it naturally goes quiet.'},
-    {title:'Advance the main thread',minutes:60,text:s.hints[0]??'Follow the strongest visual or grace-guided direction when everyone wants story progress.'},
-    {title:'Clear a compact side activity',minutes:25,text:'Pick one nearby cave, catacomb, evergaol, or field encounter and call the session after the reward.'},
-  ];
-  if(f.fireGiant||f.erdtreeFire)options[2]={title:'Cleanup night',minutes:60,text:'Revisit unfinished NPC threads and optional regions before another major story push.'};
-  const fitting=options.filter(option=>option.minutes<=budget).slice(0,3);return (fitting.length?fitting:options.slice(-1)).map(option=>({...option,time:`~${option.minutes} min`}));
+  const q=recommendation(),current=currentRegionId(),detected=new Set(profile().character?.eventIds??[]);
+  const unfinished=encounterCatalog.filter(b=>mapRegionForName(b.region)===current&&!(profile().ledger?.[String(b.flagId)]??detected.has(b.flagId)));
+  return planSession({minutes:profile().sessionMinutes??90,area:mapLabel(),quest:q?{id:q.id,name:q.name,hint:questLocation(q).hint,endingPriority:endingPriority(q.id,profile().endingTarget)>0}:null,risk:activeTransitionRisks().length>0,forge:reachableForgeSupply(flags()).length>0,dungeon:unfinished.some(b=>['dungeon','evergaol'].includes(classifyBossLocation(b.place,b.region))),legacy:unfinished.some(b=>classifyBossLocation(b.place,b.region)==='legacy'),underReady:currentReadiness().state==='under',dlc:Boolean(flags().dlcEntry),blessing:currentScaduLevel()});
 }
+
 function openBranch(id){
   const s=stage(),f=flags(),q=recommendation();
   const base={
@@ -269,21 +279,23 @@ function essentialText(f){
 }
 
 function renderMap(){
+  if(mapFocus&&renderedLocalTarget===mapFocus&&$('#worldMap').getAttribute('src')?.startsWith('data:image'))return;
+  $('#mapInspector').innerHTML='<p class="eyebrow">YOUR MAP</p><h2>Choose a reached region or pin a search result.</h2>';
   const shadow=mapLayer==='shadow';
   $('#mapCanvas').classList.toggle('shadow-layer',shadow);
-  $('#worldMap').src=shadow?'':safeUrl(MAP_IMAGE.url); $('#mapCredit').textContent=shadow?'Offline schematic of discovered Realm of Shadow regions. No external map asset is required.':`${MAP_IMAGE.credit} The app remains usable offline if the optional image is unavailable.`;
+  $('#worldMap').removeAttribute('src'); $('#mapCredit').textContent=shadow?'Offline schematic of discovered Realm of Shadow regions. No external map asset is required.':'Offline region schematic. Locally generated locations can be pinned from Search.';
   $$('[data-map-layer]').forEach(button=>button.classList.toggle('active',button.dataset.mapLayer===mapLayer));
-  $('#mapPins').innerHTML=REGIONS.filter(r=>!r.hiddenOnMap&&(shadow?(r.mapLayer==='shadow'):r.mapLayer!=='shadow')).filter(r=>profile().showAll||profile().spoiler!=='low'||regionReached(r)).map(r=>{const reached=regionReached(r),name=reached||profile().spoiler==='full'||profile().showAll?r.name:'Undiscovered';return `<button class="map-pin ${reached?'reached':'unknown'}" style="left:${r.x}%;top:${r.y}%" data-region="${r.id}" aria-label="${esc(name)}: ${reached?'reached':'not confirmed'}">${reached?'✓':'?'}<span>${esc(name)}</span></button>`}).join('');
+  $('#mapPins').innerHTML=REGIONS.filter(r=>(!r.hiddenOnMap||profile().showAll)&&(shadow?(r.mapLayer==='shadow'):r.mapLayer!=='shadow')).filter(r=>profile().showAll||regionReached(r)).map(r=>{const reached=regionReached(r),name=reached||profile().spoiler==='full'||profile().showAll?r.name:'Undiscovered';return `<button class="map-pin ${reached?'reached':'unknown'}" style="left:${r.x}%;top:${r.y}%" data-region="${r.id}" aria-label="${esc(name)}: ${reached?'reached':'not confirmed'}">${reached?'✓':'?'}<span>${esc(name)}</span></button>`}).join('');
 }
 function inspectRegion(id){
-  const r=REGIONS.find(x=>x.id===id);if(!r)return;const reached=regionReached(r),qs=QUESTS.filter(q=>q.regions.includes(id)&&(profile().mode==='Guide'||questRelevant(q)||hasStarted(q)));
+  const r=REGIONS.find(x=>x.id===id);if(!r)return;const reached=regionReached(r),qs=QUESTS.filter(q=>q.regions.includes(id)&&(profile().showAll||questRelevant(q)||hasStarted(q)));
   const missing=QUESTS.flatMap(q=>relevantItemClues(q).filter(item=>item.region===id&&!itemState(item.key))).filter((item,i,list)=>list.findIndex(x=>x.key===item.key)===i).slice(0,5);
   const focus=mapFocus&&(mapFocus.region===id||mapRegionForName(`${mapFocus.regionName??''} ${mapFocus.location??''}`)===id)?`<article class="map-focus"><p class="eyebrow">PINNED GUIDANCE</p><h3>${esc(mapFocus.name??'Target')}</h3><p>${esc(mapFocus.location??'')}</p>${mapFocus.hint?`<p>${esc(mapFocus.hint)}</p>`:''}<button class="text-button desktop-only ${window.guidanceDesktop?.isDesktop?'':'hidden'}" data-pin-overlay>Show in overlay →</button></article>`:'';
   $('#mapInspector').innerHTML=`${focus}<p class="eyebrow">${reached?'SAVE EVIDENCE: REACHED':'NOT CONFIRMED BY TRACKED FLAGS'}</p><h2>${esc(r.name)}</h2><p>${esc(r.clue)}</p><p>${reached?'The save gives us evidence you have reached this broad region. It does not mean every cave, grace, boss, or NPC here is complete.':'Keep this muted until natural exploration or stronger save evidence reaches it.'}</p>${missing.length?`<div class="evidence-box"><strong>QUEST ITEMS TO LOOK FOR</strong>${missing.map(item=>`<p>◇ ${esc(item.name)} — ${esc(item.clue)}</p>`).join('')}</div>`:''}<div>${qs.slice(0,6).map(q=>`<div class="map-quest"><strong>${profile().spoiler==='low'&&!hasStarted(q)?'Possible NPC thread':esc(q.name)}</strong><br><small>${questDone(q).size}/${q.steps.length} manually confirmed</small><br><button class="text-button" data-open-quest="${q.id}">Open thread →</button> <button class="text-button" data-locate-quest="${q.id}">Current location →</button></div>`).join('')}</div>`;
 }
 
 function stepCopy(step){
-  if(profile().spoiler==='full')return `<strong>${esc(step.label)}</strong><small>${esc(step.area)}</small><p>${esc(step.detail)}</p>`;
+  if(profile().showAll||profile().spoiler==='full')return `<strong>${esc(step.label)}</strong><small>${esc(step.area)}</small><p>${esc(step.detail)}</p>`;
   if(profile().spoiler==='balanced')return `<strong>${esc(step.label)}</strong><small>${esc(step.area)}</small><p>${esc(step.clue)}</p>`;
   return `<strong>${esc(step.area)}</strong><p>${esc(step.clue)}</p>`;
 }
@@ -303,16 +315,16 @@ function renderQuests(){
   const dialogue=dialogueRule(profile().playMode,profile().role),notice=$('#questDialogueNotice');if(notice){notice.classList.toggle('hidden',!dialogue);notice.innerHTML=dialogue?`<p class="eyebrow">${profile().role==='joiner'?'SEAMLESS STORY RULE':'STORY DRIVER'}</p><h2>${esc(dialogue.title)}</h2><p>${esc(dialogue.text)}</p>`:'';}
   const input=$('#questSearch'),query=(input?.value??'').toLowerCase(),unfinished=$('#unfinishedOnly')?.checked,relevantOnly=$('#relevantOnly')?.checked,qp=profile().quest;
   let filtered=QUESTS.filter(q=>`${q.name} ${q.area} ${q.regions.join(' ')}`.toLowerCase().includes(query)&&(!unfinished||(qp[q.id]?.length??0)<q.steps.length));
-  if(!profile().showAll&&profile().character&&(profile().mode==='Explorer'||relevantOnly))filtered=filtered.filter(q=>questRelevant(q)||hasStarted(q));
+  if(!profile().showAll&&(profile().mode==='Explorer'||relevantOnly))filtered=filtered.filter(q=>questRelevant(q)||hasStarted(q));
   filtered.sort((a,b)=>endingPriority(b.id,profile().endingTarget)-endingPriority(a.id,profile().endingTarget)||Number(b.priority==='major')-Number(a.priority==='major')||activeEvidence(b).length-activeEvidence(a).length);
   $('#questList').innerHTML=filtered.map(q=>{
     const done=questDone(q),pct=Math.round(done.size/q.steps.length*100),evidence=activeEvidence(q),relevant=questRelevant(q);
-    const portrait=q.image?`<div class="quest-portrait"><img data-npc-image data-initials="${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}" src="${safeUrl(q.image.src)}" alt="${esc(q.name)}" loading="lazy" referrerpolicy="no-referrer"><a href="${safeUrl(q.image.source)}" target="_blank" rel="noreferrer">${esc(q.image.credit)}</a></div>`:'';
+    const portrait=q.image&&desktopSettings?.remotePortraits?`<div class="quest-portrait"><img data-npc-image data-initials="${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}" src="${safeUrl(q.image.src)}" alt="${esc(q.name)}" loading="lazy" referrerpolicy="no-referrer"><a href="${safeUrl(q.image.source)}" target="_blank" rel="noreferrer">${esc(q.image.credit)}</a></div>`:'';
     const confidence=evidenceConfidence(profile().role,evidence.some(([key])=>/Rune|Grace|grace|Defeated/i.test(key))?'grace':'world',profile().playMode);
     const evidenceBox=evidence.length?`<div class="evidence-box"><strong>SAVE EVIDENCE · ${esc(confidence.toUpperCase())}</strong>${evidence.map(([,text])=>`<p>✓ ${esc(text)}</p>`).join('')}<p>${esc(profile().playMode==='single'?'Single Player evidence belongs to this character, but conversations still require manual confirmation.':profile().role==='joiner'?'Joiner mode treats shared world flags cautiously. Let the Story Host initiate important NPC dialogue first.':'Story Host mode treats world-state flags as strong evidence, but conversations still require manual confirmation.')}</p></div>`:'';
     const itemClues=relevantItemClues(q);
     const itemBox=itemClues.length?`<div class="item-clues">${itemClues.map(item=>`<div class="item-clue ${itemState(item.key)?'have':''}"><span class="item-state">${itemState(item.key)?'✓':'◇'}</span><div><strong>${esc(item.name)}</strong><p>${itemState(item.key)?'Detected in this character’s save.':esc(item.clue)}</p></div>${!itemState(item.key)?`<button class="text-button" data-region-jump="${esc(item.region)}">Map →</button>`:''}</div>`).join('')}</div>`:'';
-    return `<details class="quest" data-quest-card="${q.id}"><summary><div class="quest-title">${q.image?`<img class="npc-thumb" data-npc-image data-initials="${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}" src="${safeUrl(q.image.src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:`<span class="npc-fallback">${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}</span>`}<span class="progress-ring">${pct}%</span><div><h3>${esc(q.name)}</h3><div class="area">${esc(q.area)} · ${done.size}/${q.steps.length}</div><div class="quest-badges">${endingPriority(q.id,profile().endingTarget)?'<span class="badge ending">Mending Path</span>':''}${q.priority==='major'?'<span class="badge">major thread</span>':''}${evidence.length?`<span class="badge evidence">${evidence.length} save clue${evidence.length===1?'':'s'}</span>`:''}${!relevant&&profile().character?'<span class="badge">not current yet</span>':''}</div></div></div><span>＋</span></summary><div class="quest-body ${q.image?'with-image':''}">${portrait}<div><p class="quest-hint">Spoiler-light clue: ${esc(q.hint)}</p>${questHistory(q,done,evidence)}${evidenceBox}${itemBox}${visibleSteps(q,done).map(({step,i,veiled})=>veiled?`<div class="step veiled-step"><span class="veil-mark">✦</span><span><strong>Veiled by grace</strong><small>Future checkpoint hidden until this story advances.</small></span></div>`:`<label class="step"><input type="checkbox" data-quest="${q.id}" data-step="${i}" ${done.has(i)?'checked':''}><span class="step-copy">${stepCopy(step)}</span></label>`).join('')}</div></div></details>`;
+    return `<details class="quest" data-quest-card="${q.id}"><summary><div class="quest-title">${q.image&&desktopSettings?.remotePortraits?`<img class="npc-thumb" data-npc-image data-initials="${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}" src="${safeUrl(q.image.src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:`<span class="npc-fallback">${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}</span>`}<span class="progress-ring">${pct}%</span><div><h3>${esc(q.name)}</h3><div class="area">${esc(profile().showAll||profile().spoiler==='full'?q.area:questLocation(q).location)} · ${done.size}/${q.steps.length}</div><div class="quest-badges">${endingPriority(q.id,profile().endingTarget)?'<span class="badge ending">Mending Path</span>':''}${q.priority==='major'?'<span class="badge">major thread</span>':''}${evidence.length?`<span class="badge evidence">${evidence.length} save clue${evidence.length===1?'':'s'}</span>`:''}${!relevant&&profile().character?'<span class="badge">not current yet</span>':''}</div></div></div><span>＋</span></summary><div class="quest-body ${q.image&&desktopSettings?.remotePortraits?'with-image':''}">${portrait}<div><p class="quest-hint">Spoiler-light clue: ${esc(q.hint)}</p>${questHistory(q,done,evidence)}${evidenceBox}${itemBox}${visibleSteps(q,done).map(({step,i,veiled})=>veiled?`<div class="step veiled-step"><span class="veil-mark">✦</span><span><strong>Veiled by grace</strong><small>Future checkpoint hidden until this story advances.</small></span></div>`:`<label class="step"><input type="checkbox" data-quest="${q.id}" data-step="${i}" ${done.has(i)?'checked':''}><span class="step-copy">${stepCopy(step)}</span></label>`).join('')}</div></div></details>`;
   }).join('')||'<div class="panel quiet">No matching NPC threads.</div>';
 }
 
@@ -337,28 +349,28 @@ function renderMendingPaths(){
   const tab=$('[data-view="mending"]'),view=$('#mending'),visible=Boolean(profile().showAll||(profile().character&&mendingPathsVisible(flags())));if(tab)tab.classList.toggle('hidden',!visible);if(!view)return;
   if(!visible){view.innerHTML='<div class="panel quiet"><h2>The paths are still veiled.</h2><p>This section appears naturally once different ways of mending the world begin to matter.</p></div>';return}
   const target=profile().endingTarget,warning=endingWarning(target,flags());
-  const questState=id=>{const q=QUESTS.find(x=>x.id===id);return !q?'unseen':isComplete(q)?'complete':hasStarted(q)||questRelevant(q)?'started':'unseen'};
-  view.innerHTML=`<div class="section-heading page-heading"><div><p class="eyebrow">MENDING PATHS</p><h1>Choose a direction, not a commitment</h1></div><p>Most ending prerequisites can coexist in one playthrough, and the final choice is made at the end. The Frenzied Flame is the major exception: while active it overrides the others unless removed with Miquella’s Needle.</p></div>${warning?`<article class="transition-warning danger"><p class="eyebrow">PATH WARNING</p><h2>${esc(warning.title)}</h2><p>${esc(warning.text)}</p></article>`:''}<div class="ending-grid">${ENDING_PATHS.map(path=>{const status=pathStatus(path,flags(),questState),selected=target===path.id;if(status.state==='hidden'&&!profile().showAll)return `<div class="ending-card veiled-ending"><span class="veil-mark">✦</span><p class="eyebrow">VEILED BY GRACE</p><h2>Unrevealed path</h2><p>Keep exploring. Guidance of Grace will reveal this possibility when your character has actually encountered its thread.</p></div>`;return `<button class="ending-card ${selected?'selected':''} ${status.state}" data-ending="${path.id}"><span class="eyebrow">${esc(status.state.toUpperCase())}</span><h2>${esc(path.name)}</h2><strong>${esc(path.subtitle)}</strong><p>${esc(path.description)}</p><small>${esc(status.text)}</small></button>`}).join('')}</div><p class="muted-copy">Selecting a path only changes Guidance of Grace priorities and warnings. It never changes the game or your save.</p>`;
+  const questState=id=>{const q=QUESTS.find(x=>x.id===id);return !q?'unseen':isComplete(q)?'complete':hasStarted(q)?'started':'unseen'};
+  view.innerHTML=`<div class="section-heading page-heading"><div><p class="eyebrow">MENDING PATHS</p><h1>Choose a direction, not a commitment</h1></div><p>Most ending prerequisites can coexist in one playthrough, and the final choice is made at the end. ${profile().showAll||flags().frenziedFlame||flags().frenziedProscriptionGrace?'The Frenzied Flame overrides other choices until removed through its reversal route.':'Some choices can restrict other paths. Guidance will warn when that becomes relevant.'}</p></div>${warning?`<article class="transition-warning danger"><p class="eyebrow">PATH WARNING</p><h2>${esc(warning.title)}</h2><p>${esc(warning.text)}</p></article>`:''}<div class="ending-grid">${ENDING_PATHS.map(path=>{const status=pathStatus(path,flags(),questState),selected=target===path.id;if(status.state==='hidden'&&!profile().showAll)return `<div class="ending-card veiled-ending"><span class="veil-mark">✦</span><p class="eyebrow">VEILED BY GRACE</p><h2>Unrevealed path</h2><p>Keep exploring. Guidance of Grace will reveal this possibility when your character has actually encountered its thread.</p></div>`;return `<button class="ending-card ${selected?'selected':''} ${status.state}" data-ending="${path.id}"><span class="eyebrow">${esc(status.state.toUpperCase())}</span><h2>${esc(path.name)}</h2><strong>${esc(path.subtitle)}</strong><p>${esc(path.description)}</p><small>${esc(status.text)}</small></button>`}).join('')}</div><p class="muted-copy">Selecting a path only changes Guidance of Grace priorities and warnings. It never changes the game or your save.</p>`;
 }
 
 function renderLedger(){
-  const root=$('#ledgerList');if(!root)return;
-  const stats=$('#ledgerStats'),detected=new Set(profile().character?.eventIds??[]),manual=profile().ledger??{},locations=ENCOUNTER_LOCATIONS;
-  if(stats){const done=GENERATED_BOSSES.filter(b=>detected.has(b.flagId)||manual[String(b.flagId)]).length,dungeons=locations.filter(x=>x.type==='dungeon').length,evergaols=locations.filter(x=>x.type==='evergaol').length,legacy=locations.filter(x=>x.type==='legacy').length;stats.innerHTML=`<span class="chip">${done}/${GENERATED_BOSSES.length} encounters</span><span class="chip">${dungeons} boss-bearing dungeons/gaols</span><span class="chip">${evergaols} evergaols</span><span class="chip">${legacy} legacy locations</span><span class="chip">${GENERATED_BOSSES.filter(b=>b.dlc).length} DLC encounters</span>`}
-  if(!GENERATED_BOSSES.length){root.innerHTML='<article class="panel quiet"><h2>Encounter catalog unavailable</h2><p>The bundled catalog did not load. Use the knowledge updater or reinstall the application.</p></article>';return}
-  const groups=GENERATED_BOSSES.reduce((out,boss)=>((out[boss.region]??=[]).push(boss),out),{});
-  root.innerHTML=`<details class="ledger-region ledger-location-index"><summary>Boss-bearing locations <span>${locations.length}</span></summary>${locations.map(loc=>`<div class="ledger-row location-row"><span class="location-mark">⌖</span><span><strong>${esc(loc.name)}</strong><small>${esc(loc.region)} · ${esc(loc.type)} · ${loc.encounters.length} encounter${loc.encounters.length===1?'':'s'}</small><span class="location-enemies">${esc(loc.encounters.join(' · '))}</span></span></div>`).join('')}</details>`+Object.entries(groups).map(([region,bosses])=>{const done=bosses.filter(b=>detected.has(b.flagId)||manual[String(b.flagId)]).length;return `<details class="ledger-region"><summary>${esc(region)} <span>${done}/${bosses.length}</span></summary>${bosses.map(boss=>{const checked=detected.has(boss.flagId)||manual[String(boss.flagId)],auto=detected.has(boss.flagId),kind=classifyBossLocation(boss.place,boss.region),insight=bossInsight(boss.name);return `<div class="ledger-row"><input type="checkbox" data-ledger="${boss.flagId}" aria-label="Mark ${esc(boss.name)} complete" ${checked?'checked':''} ${auto?'disabled':''}><span><strong>${esc(boss.name)}</strong><small>${esc(boss.place||kind)} · ${esc(kind)}${boss.dlc?' · Shadow of the Erdtree':''}${auto?' · save confirmed':''}</small>${insight?`<details class="ledger-insight"><summary>Whisper of Grace</summary><p><b>Weakness:</b> ${esc(insight.weakness)}</p><p><b>Field note:</b> ${esc(insight.tip)}</p><p><b>If you want an edge:</b> ${esc(insight.exploit)}</p></details>`:''}</span></div>`}).join('')}</details>`}).join('');
+  const root=$('#ledgerList');if(!root)return;const visibleBosses=encounterCatalog.filter(b=>profile().showAll||knowledgeVisible({type:'ledger-region',region:b.region,location:b.place}));
+  const stats=$('#ledgerStats'),detected=new Set(profile().character?.eventIds??[]),manual=profile().ledger??{},locations=deriveEncounterLocations(visibleBosses.map(b=>profile().showAll||profile().spoiler==='full'||detected.has(b.flagId)||manual[String(b.flagId)]?b:{...b,name:'Major challenge'}));
+  if(stats){const done=encounterCatalog.filter(b=>manual[String(b.flagId)]??detected.has(b.flagId)).length,dungeons=locations.filter(x=>x.type==='dungeon').length,evergaols=locations.filter(x=>x.type==='evergaol').length,legacy=locations.filter(x=>x.type==='legacy').length;stats.innerHTML=`<span class="chip">${done}/${encounterCatalog.length} encounters</span><span class="chip">${dungeons} boss-bearing dungeons/gaols</span><span class="chip">${evergaols} evergaols</span><span class="chip">${legacy} legacy locations</span><span class="chip">${encounterCatalog.filter(b=>b.dlc).length} DLC encounters</span>`}
+  if(!encounterCatalog.length){root.innerHTML='<article class="panel quiet"><h2>Encounter catalog unavailable</h2><p>The bundled catalog did not load. Use the knowledge updater or reinstall the application.</p></article>';return}
+  const groups=visibleBosses.reduce((out,boss)=>((out[boss.region]??=[]).push(boss),out),{});
+  root.innerHTML=`<details class="ledger-region ledger-location-index"><summary>Boss-bearing locations <span>${locations.length}</span></summary>${locations.map(loc=>`<div class="ledger-row location-row"><span class="location-mark">⌖</span><span><strong>${esc(loc.name)}</strong><small>${esc(loc.region)} · ${esc(loc.type)} · ${loc.encounters.length} encounter${loc.encounters.length===1?'':'s'}</small><span class="location-enemies">${esc(loc.encounters.join(' · '))}</span></span></div>`).join('')}</details>`+Object.entries(groups).map(([region,bosses])=>{const done=bosses.filter(b=>manual[String(b.flagId)]??detected.has(b.flagId)).length;return `<details class="ledger-region"><summary>${esc(region)} <span>${done}/${bosses.length}</span></summary>${bosses.map(boss=>{const checked=manual[String(boss.flagId)]??detected.has(boss.flagId),auto=detected.has(boss.flagId),kind=classifyBossLocation(boss.place,boss.region),revealed=profile().showAll||profile().spoiler==='full'||checked,insight=revealed?bossInsight(boss.name):null;return `<div class="ledger-row"><input type="checkbox" data-ledger="${boss.flagId}" aria-label="Mark ${esc(revealed?boss.name:"Major challenge")} complete" ${checked?'checked':''} ><span><strong>${esc(revealed?boss.name:"Major challenge")}</strong><small>${esc(boss.place||kind)} · ${esc(kind)}${boss.dlc?' · Shadow of the Erdtree':''}${auto?profile().playMode==='seamless'&&profile().role==='joiner'?' · shared-world evidence':' · save evidence':''}</small>${insight?`<details class="ledger-insight"><summary>Whisper of Grace</summary><p><b>Weakness:</b> ${esc(insight.weakness)}</p><p><b>Field note:</b> ${esc(insight.tip)}</p><p><b>If you want an edge:</b> ${esc(insight.exploit)}</p></details>`:''}</span></div>`}).join('')}</details>`}).join('');
 }
 
 function renderKnowledgeSearch(){
   const input=$('#knowledgeSearch'),root=$('#knowledgeResults'),toggle=$('#showAllKnowledge'),count=$('#searchCount');if(!input||!root)return;
   if(toggle)toggle.checked=profile().showAll;
-  const query=input.value.trim(),all=[...KNOWLEDGE_INDEX,...supplementalKnowledge],matches=searchKnowledge(all,query,{limit:160}).filter(knowledgeVisible);
+  const query=input.value.trim(),all=[...KNOWLEDGE_INDEX,...supplementalKnowledge],matches=searchKnowledge(all.filter(knowledgeVisible),query,{limit:160}).map(item=>item.type==='quest'?{...item,location:questLocation(QUESTS.find(q=>q.id===item.questId)).location}:item.type==='location'&&!profile().showAll&&profile().spoiler!=='full'?{...item,enemies:[],description:'Encounter location in a reached region. Explore to learn what waits here.'}:item);
   if(count)count.textContent=`${matches.length}${matches.length===160?'+':''} result${matches.length===1?'':'s'}`;
   const typeLabel={encounter:'Encounter',location:'Location',quest:'NPC thread',forge:'Forge Supply',story:'Book of Knowledge',glossary:'Glossary',item:'Quest item','boss-detail':'Boss detail'};
-  root.innerHTML=matches.map(item=>{const region=mapRegionForName(`${item.region??''} ${item.location??''}`),canMap=Boolean(region||item.type==='quest'||item.type==='forge'),rewards=(item.rewards??[]).filter(Boolean);let actions='';if(item.type==='quest')actions=`<button class="text-button" data-open-quest="${esc(item.questId)}">Open thread →</button><button class="text-button" data-locate-quest="${esc(item.questId)}">Where now? ⟡</button>`;else if(item.type==='forge')actions=`<button class="text-button" data-forge-reveal="${esc(item.forgeId)}">Reveal location →</button>`;else if(item.type==='story'||item.type==='glossary')actions='<button class="text-button" data-view="story">Open Books of Knowledge →</button>';else if(canMap)actions=`<button class="text-button" data-locate-record="${esc(item.id)}">Show on map →</button>`;return `<article class="panel knowledge-result" data-knowledge-id="${esc(item.id)}"><p class="eyebrow">${esc(typeLabel[item.type]??item.type)}</p><h2>${esc(item.title)}</h2>${item.subtitle?`<strong>${esc(item.subtitle)}</strong>`:''}${item.region||item.location?`<p class="meta">${esc([item.region,item.location].filter(Boolean).join(' · '))}</p>`:''}${item.description?`<p>${esc(item.description)}</p>`:''}${item.enemies?.length?`<p><b>Encounter:</b> ${esc(item.enemies.join(', '))}</p>`:''}${rewards.length?`<p><b>Rewards / drops:</b> ${esc(rewards.join(', '))}</p>`:''}<div class="button-row">${actions}</div></article>`}).join('')||'<article class="panel quiet"><h2>No matching records</h2><p>Try a boss, NPC, dungeon type, upgrade stone, bell bearing, item or region. Enable Show all to search undiscovered content deliberately.</p></article>';
+  root.innerHTML=matches.map(item=>{const region=mapRegionForName(`${item.region??''} ${item.location??''}`),canMap=Boolean(region||Number.isFinite(item.x)||item.type==='quest'||item.type==='forge'),rewards=(item.rewards??[]).filter(Boolean);let actions='';if(item.type==='quest')actions=`<button class="text-button" data-open-quest="${esc(item.questId)}">Open thread →</button><button class="text-button" data-locate-quest="${esc(item.questId)}">Where now? ⟡</button>`;else if(item.type==='forge')actions=`<button class="text-button" data-forge-reveal="${esc(item.forgeId)}">Reveal location →</button>`;else if(item.type==='story'||item.type==='glossary')actions='<button class="text-button" data-view="story">Open Books of Knowledge →</button>';else if(canMap)actions=`<button class="text-button" data-locate-record="${esc(item.id)}">Show on map →</button>`;return `<article class="panel knowledge-result" data-knowledge-id="${esc(item.id)}"><p class="eyebrow">${esc(typeLabel[item.type]??item.type)}</p><h2>${esc(item.title)}</h2>${item.subtitle?`<strong>${esc(item.subtitle)}</strong>`:''}${item.region||item.location?`<p class="meta">${esc([item.region,item.location].filter(Boolean).join(' · '))}</p>`:''}${item.description?`<p>${esc(item.description)}</p>`:''}${item.enemies?.length?`<p><b>Encounter:</b> ${esc(item.enemies.join(', '))}</p>`:''}${rewards.length?`<p><b>Rewards / drops:</b> ${esc(rewards.join(', '))}</p>`:''}<div class="button-row">${actions}<button class="text-button" data-track-record="${esc(item.id)}">${profile().tracked?.includes(item.id)?'Tracked ✓':'Track this'}</button></div></article>`}).join('')||'<article class="panel quiet"><h2>No matching records</h2><p>Try a boss, NPC, dungeon type, upgrade stone, bell bearing, item or region. Enable Show all to search undiscovered content deliberately.</p></article>';
 }
-function locateKnowledgeRecord(id){const item=[...KNOWLEDGE_INDEX,...supplementalKnowledge].find(x=>x.id===id);if(!item)return;locateTarget({name:item.title,location:item.location||item.region,region:mapRegionForName(`${item.region??''} ${item.location??''}`),regionName:item.region,hint:item.description});}
+function locateKnowledgeRecord(id){const item=[...KNOWLEDGE_INDEX,...supplementalKnowledge].find(x=>x.id===id);if(!item)return;locateTarget({x:item.x,y:item.y,layer:item.layer,name:item.title,location:item.location||item.region,region:mapRegionForName(`${item.region??''} ${item.location??''}`),regionName:item.region,hint:item.description});}
 function revealForge(id){const item=FORGE_SUPPLY.find(x=>x.id===id);if(!item)return;locateTarget({name:item.name,location:item.location,region:item.region,regionName:item.regionName,hint:`${item.source} Unlocks at the Twin Maiden Husks: ${item.unlocks.join(', ')}.`});}
 
 function unlockedGlossary(){if(profile().showAll)return GLOSSARY;const ids=new Set(unlockedStory(flags()).flatMap(beat=>beat.glossary??[]));return GLOSSARY.filter(entry=>ids.has(entry.id));}
@@ -378,15 +390,14 @@ function renderGlossary(){
   $('#glossaryList').innerHTML=entries.map(entry=>`<article class="glossary-entry" data-glossary-entry="${entry.id}"><h3>${esc(entry.name)}</h3><p>${esc(entry.summary)}</p></article>`).join('')||'<p class="muted-copy">No unlocked glossary entries match.</p>';
 }
 
-function renderKnowledgeStatus(status){const el=$('#knowledgeStatus');if(!el)return;if(!status){el.textContent=`Bundled offline snapshot: ${GENERATED_BOSSES_SNAPSHOT.count} encounters verified ${GENERATED_BOSSES_SNAPSHOT.verified}.`;return}const ok=(status.sources??[]).filter(x=>x.state==='updated'),bad=(status.sources??[]).filter(x=>x.state==='error');el.textContent=`Knowledge checked ${status.lastChecked?new Date(status.lastChecked).toLocaleString():'never'} · ${ok.length} source${ok.length===1?'':'s'} refreshed${bad.length?` · ${bad.length} unavailable (bundled data remains active)`:''}.`;}
+function renderKnowledgeStatus(status){const el=$('#knowledgeStatus');if(!el)return;if(!status){el.textContent=`Bundled offline snapshot: ${GENERATED_BOSSES_SNAPSHOT.count} encounters verified ${GENERATED_BOSSES_SNAPSHOT.verified}.`;return}el.textContent=`Encounter source: ${status.source??GENERATED_BOSSES_SNAPSHOT.source} · version ${String(status.version??'bundled').slice(0,16)} · last successful update ${status.lastUpdated?new Date(status.lastUpdated).toLocaleString():'bundled snapshot'}. ${(status.sources??[]).some(x=>x.state==='error')?'Latest check unavailable; last valid data remains active. ':''}${status.local?`Local catalog: ${status.local.records} records · ${status.local.gameVersion} · generated ${new Date(status.local.generatedAt).toLocaleString()} · ${status.local.source}`:''}`;}
 
 function renderDesktop(){
   const isDesktop=Boolean(window.guidanceDesktop?.isDesktop);$$('.desktop-only').forEach(el=>el.classList.toggle('hidden',!isDesktop));if(!isDesktop||!desktopSettings)return;
   const set=(id,value,property='checked')=>{const el=$(id);if(el)el[property]=value};
   set('#desktopPlayMode',desktopSettings.playMode,'value');set('#desktopRole',desktopSettings.multiplayerRole,'value');set('#overlayHotkey',desktopSettings.overlayHotkey,'value');set('#mapOverlayHotkey',desktopSettings.mapOverlayHotkey,'value');
-  for(const key of ['overlayEnabled','autoShowWarnings','autoShowAreaNpcs','wakeWithGame','closeAfterGame','keepRunningInBackground','startWithWindows','checkForUpdates','autoDownloadUpdates','knowledgeAutoUpdate'])set(`#${key}`,Boolean(desktopSettings[key]));
+  for(const key of ['overlayEnabled','autoShowWarnings','autoShowAreaNpcs','wakeWithGame','closeAfterGame','keepRunningInBackground','startWithWindows','checkForUpdates','autoDownloadUpdates','knowledgeAutoUpdate','remotePortraits'])set(`#${key}`,Boolean(desktopSettings[key]));
   $('#desktopRoleWrap').classList.toggle('hidden',desktopSettings.playMode==='single');$('#roleExplanation').textContent=roleNote(desktopSettings.multiplayerRole,desktopSettings.playMode);
-  profile().playMode=desktopSettings.playMode;profile().role=desktopSettings.multiplayerRole;saveState();
   $('#desktopSavePath').textContent=desktopSettings.selectedSavePath||'No save selected; the app will prefer a discovered .co2 file for Seamless or .sl2 for vanilla.';
   const parsed=profile().character?.scaduLevel;$('#scaduLevel').value=parsed??profile().scaduLevel??'';$('#scaduLevel').disabled=Number.isInteger(parsed);$('#scaduHelp').textContent=Number.isInteger(parsed)?`Read from save: Scadutree ${parsed} · Revered Spirit Ash ${profile().character?.spiritBlessingLevel??'unknown'}.`:'Automatic blessing read unavailable for this slot; manual fallback is enabled.';
   $('#desktopSlot').innerHTML=pendingSave?.slots?.length?pendingSave.slots.map(c=>`<option value="${c.slot}" ${c.slot===desktopSettings.selectedSlot?'selected':''}>${esc(c.name)} · Lv ${c.level}${Number.isInteger(c.scaduLevel)?` · Scadu ${c.scaduLevel}`:''}</option>`).join(''):'<option value="">Waiting for save read</option>';
@@ -407,8 +418,8 @@ async function handleSave(file){
     $('#characterChoices').innerHTML=parsed.slots.map(c=>`<button type="button" class="character-choice" data-slot="${c.slot}"><strong>${esc(c.name)}</strong><span>Level ${c.level} · ${formatPlaytime(c.secondsPlayed)}</span></button>`).join('');$('#characterDialog').showModal();
   }catch(error){alert(`Could not read this save: ${error.message}`)}
 }
-function chooseCharacter(slot){
-  const c=pendingSave?.slots.find(s=>s.slot===slot);if(!c)return;applyCharacter(c);if($('#characterDialog').open)$('#characterDialog').close();
+async function chooseCharacter(slot){
+  const c=pendingSave?.slots.find(s=>s.slot===slot);if(!c)return;if(window.guidanceDesktop)desktopSettings=await window.guidanceDesktop.setSettings({selectedSlot:slot});applyCharacter(c);if($('#characterDialog').open)$('#characterDialog').close();
 }
 async function pickOrUpdateSave(){
   try{if(window.guidanceDesktop?.isDesktop)return window.guidanceDesktop.readSave();let handle=saveHandles[state.active];if(!handle&&window.showOpenFilePicker){[handle]=await window.showOpenFilePicker({types:[{description:'Elden Ring save',accept:{'application/octet-stream':['.co2','.sl2']}}]});saveHandles[state.active]=handle}if(handle)return handleSave(await handle.getFile());$('#saveInput').click()}catch(error){if(error.name!=='AbortError')alert(`Could not open the save: ${error.message}`)}
@@ -423,8 +434,8 @@ async function importTracker(file){
 
 function cloudMessage(text,error=false){const el=$('#cloudMessage');el.textContent=text;el.style.color=error?'var(--danger)':'var(--gold2)'}
 async function renderCloud(){
-  const status=cloudStatus();$('#cloudHeading').textContent=status.configured?(status.signedIn?'Shared campaign':'Sign in to share progress'):'Cloud sync is ready to configure';
-  $('#cloudStatusText').textContent=status.configured?'Only derived tracker progress is synced. The .co2 file stays on this computer.':'The SQL schema and client are included. Work only needs to attach a Supabase project and deployment.';
+  const status=cloudStatus();$('#cloudHeading').textContent=status.configured?(status.signedIn?'Shared campaign':'Sign in to share progress'):'Companion profiles stay on this PC';
+  $('#cloudStatusText').textContent=status.configured?'Only derived tracker progress is synced. The .co2 file stays on this computer.':'Each journey keeps its own profiles, spoiler preferences and manual progress. Export a .grace journey to back it up.';
   $('#cloudAuth').classList.toggle('hidden',!status.configured||status.signedIn);$('#cloudControls').classList.toggle('hidden',!status.configured||!status.signedIn);
   $('#sendMagicLink').disabled=!status.configured;
   if(!status.configured)return;
@@ -439,8 +450,8 @@ function renderRemoteProfiles(){
   $('#remoteProfiles').innerHTML=remoteStates.length?remoteStates.map(r=>{const p=r.profile??{},c=p.character;return `<article class="remote-card"><strong>${esc(r.display_name||p.name||'Tarnished')} · ${esc(r.role||'member')}</strong><span>${c?`${esc(c.name)} · Lv ${c.level} · ${esc(getStage(c.flags??{}).area)}`:'No synced save character'} · updated ${r.updated_at?new Date(r.updated_at).toLocaleString():'unknown'}</span></article>`}).join(''):'<p>No member has synced a profile yet.</p>';
 }
 
-$('#profileSelect').addEventListener('change',e=>{state.active=Number(e.target.value);saveState();render()});
-$('#spoilerSelect').addEventListener('change',e=>{profile().spoiler=e.target.value;saveState();renderQuests();renderMap()});
+$('#profileSelect').addEventListener('change',async e=>{await flushJourney();state.active=Number(e.target.value);overlayMapTarget=profile().pinnedTarget;mapFocus=overlayMapTarget;desktopSettings=await window.guidanceDesktop?.setSettings({playMode:profile().playMode,multiplayerRole:profile().role,selectedSavePath:profile().savePath,selectedSlot:profile().character?.slot??null});saveState();render();await window.guidanceDesktop?.readSave();});
+$('#spoilerSelect').addEventListener('change',e=>{profile().spoiler=e.target.value;saveState();render()});
 $('#saveButton').addEventListener('click',pickOrUpdateSave);$('#syncAgain').addEventListener('click',pickOrUpdateSave);
 $('#saveInput').addEventListener('change',e=>{if(e.target.files[0])handleSave(e.target.files[0]);e.target.value=''});
 $('#closeGuidance').addEventListener('click',()=>$('#guidancePanel').classList.add('hidden'));
@@ -456,6 +467,7 @@ $('#campaignSelect').addEventListener('change',e=>{setCampaign(e.target.value);v
 $('#pushCloud').addEventListener('click',async()=>{try{await pushProfile(profile());cloudMessage('Your derived profile is synced.');await renderCloud()}catch(e){cloudMessage(e.message,true)}});$('#refreshCloud').addEventListener('click',()=>renderCloud());
 
 document.addEventListener('click',e=>{
+  const tracked=e.target.closest('[data-track-record]');if(tracked){const ids=new Set(profile().tracked??[]),id=tracked.dataset.trackRecord;ids.has(id)?ids.delete(id):ids.add(id);profile().tracked=[...ids];saveState();renderKnowledgeSearch();return;}
   const nav=e.target.closest('[data-view]');if(nav){activateView(nav.dataset.view);return}
   const layer=e.target.closest('[data-map-layer]');if(layer){mapLayer=layer.dataset.mapLayer==='shadow'?'shadow':'base';renderMap();return}
   const branch=e.target.closest('[data-branch]');if(branch){openBranch(branch.dataset.branch);return}
@@ -475,12 +487,12 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('error',e=>{const img=e.target.closest?.('img[data-npc-image]');if(!img)return;const fallback=document.createElement('span');fallback.className=img.classList.contains('npc-thumb')?'npc-fallback':'npc-fallback portrait-fallback';fallback.textContent=img.dataset.initials||'?';img.replaceWith(fallback)},true);
 document.addEventListener('change',e=>{
-  if(e.target.matches('[data-ledger]')){profile().ledger[e.target.dataset.ledger]=e.target.checked;if(!e.target.checked)delete profile().ledger[e.target.dataset.ledger];saveState();renderLedger();return}
+  if(e.target.matches('[data-ledger]')){profile().ledger[e.target.dataset.ledger]=e.target.checked;saveState();renderLedger();return}
   if(e.target.matches('[data-quest]')){const id=e.target.dataset.quest,step=Number(e.target.dataset.step),set=new Set(profile().quest[id]??[]);e.target.checked?set.add(step):set.delete(step);profile().quest[id]=[...set].sort((a,b)=>a-b);saveState();renderQuests();renderChecks();return}
   if(e.target.matches('[data-profile-name]')){const i=Number(e.target.dataset.profileName);state.profiles[i].name=e.target.value.trim()||`Profile ${i+1}`;saveState();renderProfiles();return}
   if(e.target.matches('[data-profile-mode]')){const i=Number(e.target.dataset.profileMode),mode=e.target.value;state.profiles[i].mode=MODES.has(mode)?mode:state.profiles[i].mode;saveState();renderProfiles();return}
-  if(e.target.matches('[data-profile-play]')){const i=Number(e.target.dataset.profilePlay);state.profiles[i].playMode=e.target.value==='single'?'single':'seamless';saveState();renderProfiles();return}
-  if(e.target.matches('[data-profile-role]')){const i=Number(e.target.dataset.profileRole);state.profiles[i].role=e.target.value==='host'?'host':'joiner';saveState();renderProfiles()}
+  if(e.target.matches('[data-profile-play]')){void createJourney(e.target.value==='single'?'single':'seamless');return}
+  if(e.target.matches('[data-profile-role]')){const i=Number(e.target.dataset.profileRole);state.profiles[i].role=e.target.value==='host'?'host':'joiner';if(i===state.active)void updateDesktopSettings({multiplayerRole:state.profiles[i].role});else{saveState();renderProfiles()}}
 });
 
 async function awaitJourneyLoad(id){try{await loadJourney(id);$('#journeyDialog')?.close();journeyDialogResolve?.();journeyDialogResolve=null}catch(error){alert(error.message)}}
@@ -489,7 +501,8 @@ function openQuest(id){activateView('quests');$('#questSearch').value='';renderQ
 
 async function updateDesktopSettings(patch){
   if(!window.guidanceDesktop?.isDesktop)return;
-  desktopSettings=await window.guidanceDesktop.setSettings(patch);profile().playMode=desktopSettings.playMode;profile().role=desktopSettings.multiplayerRole;saveState();renderDesktop();syncOverlay();
+  if(patch.playMode&&patch.playMode!==profile().playMode){await createJourney(patch.playMode);return;}
+  desktopSettings=await window.guidanceDesktop.setSettings(patch);profile().playMode=desktopSettings.playMode;profile().role=desktopSettings.multiplayerRole;profile().savePath=desktopSettings.selectedSavePath;saveState();render();
 }
 
 async function initDesktop(){
@@ -498,12 +511,17 @@ async function initDesktop(){
   await chooseJourneyOnLaunch();
   desktopSettings=await window.guidanceDesktop.getSettings();profile().playMode=desktopSettings.playMode;profile().role=desktopSettings.multiplayerRole;saveState();
   const games=await window.guidanceDesktop.discoverGames().catch(()=>({}));
-  supplementalKnowledge=await window.guidanceDesktop.knowledgeCatalog().catch(()=>[]);
+  await refreshKnowledge();
+  const info=await window.guidanceDesktop.appInfo();$('#appVersion').textContent=`Version ${info.version}`;
+  window.guidanceDesktop.onSaveError(error=>{$('#syncText').textContent=error.message;});
   renderKnowledgeStatus(await window.guidanceDesktop.knowledgeStatus().catch(()=>null));
   window.guidanceDesktop.onKnowledge(status=>{renderKnowledgeStatus(status);void window.guidanceDesktop.knowledgeCatalog().then(items=>{supplementalKnowledge=items;renderKnowledgeSearch()})});
   $('#gamePathStatus').textContent=games?.gameDir?`Detected: ${games.gameDir}${games.seamless?' · Seamless launcher found':' · Seamless launcher not auto-detected'}`:'Steam Elden Ring install was not auto-detected; you can still choose launchers manually in a later build or launch the game normally.';
   window.guidanceDesktop.onSave(payload=>{
+    if(switchingJourney||payload.journeyId!==activeJourneyId)return;
+    profile().savePath=payload.filePath;
     pendingSave={slots:payload.slots??[]};
+    if(!Number.isInteger(desktopSettings?.selectedSlot)){if(pendingSave.slots.length){$('#characterChoices').innerHTML=pendingSave.slots.map(c=>`<button type="button" class="character-choice" data-slot="${c.slot}"><strong>${esc(c.name)}</strong><span>Level ${c.level}</span></button>`).join('');if(!$('#characterDialog').open)$('#characterDialog').showModal();}return;}
     const selected=payload.selected??payload.slots?.[0];
     if(selected){if(Number.isInteger(desktopSettings?.selectedSlot)&&selected.slot!==desktopSettings.selectedSlot){const wanted=payload.slots.find(slot=>slot.slot===desktopSettings.selectedSlot);if(wanted)applyCharacter(wanted,{changedKeys:payload.diff?.changed??[]});else applyCharacter(selected,{changedKeys:payload.diff?.changed??[]})}else applyCharacter(selected,{changedKeys:payload.diff?.changed??[]})}
     renderDesktop();
@@ -516,7 +534,7 @@ async function initDesktop(){
 function mainWindowFocus(){void window.guidanceDesktop?.showMain()}
 
 for(const [id,key] of [['#desktopPlayMode','playMode'],['#desktopRole','multiplayerRole'],['#overlayHotkey','overlayHotkey'],['#mapOverlayHotkey','mapOverlayHotkey']])$(id).addEventListener('change',e=>void updateDesktopSettings({[key]:e.target.value}));
-for(const key of ['overlayEnabled','autoShowWarnings','autoShowAreaNpcs','wakeWithGame','closeAfterGame','keepRunningInBackground','startWithWindows','checkForUpdates','autoDownloadUpdates','knowledgeAutoUpdate'])$(`#${key}`).addEventListener('change',e=>void updateDesktopSettings({[key]:e.target.checked}));
+for(const key of ['overlayEnabled','autoShowWarnings','autoShowAreaNpcs','wakeWithGame','closeAfterGame','keepRunningInBackground','startWithWindows','checkForUpdates','autoDownloadUpdates','knowledgeAutoUpdate','remotePortraits'])$(`#${key}`).addEventListener('change',e=>void updateDesktopSettings({[key]:e.target.checked}));
 $('#desktopSlot').addEventListener('change',e=>{const slot=Number(e.target.value);if(Number.isInteger(slot)){void updateDesktopSettings({selectedSlot:slot});const c=pendingSave?.slots?.find(x=>x.slot===slot);if(c)applyCharacter(c)}});
 $('#scaduLevel').addEventListener('change',e=>{if(Number.isInteger(profile().character?.scaduLevel))return;const value=e.target.value===''?null:Number(e.target.value);profile().scaduLevel=Number.isInteger(value)&&value>=0&&value<=20?value:null;saveState();renderHome();renderStory();syncOverlay()});
 $('#chooseDesktopSave').addEventListener('click',async()=>{const chosen=await window.guidanceDesktop?.chooseSave();if(chosen){desktopSettings=await window.guidanceDesktop.getSettings();renderDesktop()}});
@@ -531,7 +549,7 @@ $('#shortcutSeamless').addEventListener('click',()=>{if(window.guidanceDesktop)w
 $('#shortcutVanilla').addEventListener('click',()=>{if(window.guidanceDesktop)window.guidanceDesktop.createLauncherShortcut('vanilla').then(path=>alert(`Created ${path}`)).catch(error=>alert(error.message))});
 $('#checkUpdates').addEventListener('click',async()=>{const result=await window.guidanceDesktop?.checkUpdates();if(result?.state)$('#updateStatus').textContent=result.message??result.state});
 $('#installUpdate').addEventListener('click',()=>window.guidanceDesktop?.installUpdate());
-$('#checkKnowledge').addEventListener('click',async()=>{if(!window.guidanceDesktop)return;$('#knowledgeStatus').textContent='Refreshing licensed knowledge sources…';const status=await window.guidanceDesktop.updateKnowledge();supplementalKnowledge=await window.guidanceDesktop.knowledgeCatalog();renderKnowledgeSearch();renderKnowledgeStatus(status)});
+$('#checkKnowledge').addEventListener('click',async()=>{if(!window.guidanceDesktop)return;$('#knowledgeStatus').textContent='Refreshing licensed knowledge sources…';const status=await window.guidanceDesktop.updateKnowledge();await refreshKnowledge();renderLedger();renderKnowledgeSearch();renderKnowledgeStatus(status)});
 $('#openGameMovies').addEventListener('click',()=>window.guidanceDesktop?.openGameMovies().catch(error=>alert(error.message)));
 $('#importKnowledge').addEventListener('click',async()=>{const result=await window.guidanceDesktop?.importKnowledge();if(result){supplementalKnowledge=await window.guidanceDesktop.knowledgeCatalog();renderKnowledgeSearch();alert(`Imported ${result.records} searchable game-data records.`)}});
 $('#journeySelect').addEventListener('change',e=>void awaitJourneyLoad(e.target.value));
@@ -548,3 +566,9 @@ consumeAuthRedirect();
 if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
 render();
 void initDesktop();
+
+$('#globalShowAll').addEventListener('change',e=>{profile().showAll=e.target.checked;saveState();render()});
+
+$('#generateLocal').addEventListener('click',async()=>{const button=$('#generateLocal');button.disabled=true;try{const result=await window.guidanceDesktop.generateLocal();await refreshKnowledge();render();$('#knowledgeStatus').textContent=`Generated ${result.records} local records · ${result.gameVersion}`;}catch(error){$('#knowledgeStatus').textContent=error.message;}finally{button.disabled=false;}});
+window.guidanceDesktop?.onGeneration(({message})=>{$('#knowledgeStatus').textContent=message});
+$('#journeyImportChooser').addEventListener('click',async()=>{const j=await window.guidanceDesktop.importJourney();if(j)await awaitJourneyLoad(j.id)});

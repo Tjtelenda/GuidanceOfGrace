@@ -1,10 +1,15 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
+import {validateBossCatalog} from '../desktop/knowledge-updater.js';
+import {GENERATED_BOSSES as previous} from '../content/generated-bosses.js';
 const SOURCE='https://raw.githubusercontent.com/BuLEEto/ER_Boss_Kill_Checklist/main/bosses.json';
 const response=await fetch(SOURCE,{headers:{'user-agent':'Guidance-of-Grace-catalog-sync'}});
 if(!response.ok)throw new Error(`Catalog download failed: ${response.status}`);
 const regions=await response.json();
-const bosses=regions.flatMap(region=>(region.bosses??[]).map(boss=>({region:region.region_name,name:boss.boss,place:boss.place||'',flagId:boss.flag_id,mainStory:Boolean(boss.main_story),remembrance:Boolean(boss.rememberance),greatRune:Boolean(boss.great_rune)})));
-if(bosses.length<150)throw new Error(`Catalog unexpectedly small (${bosses.length})`);
-const text=`// Generated from ${SOURCE}\n// Source project MIT licensed. Do not edit by hand.\nexport const GENERATED_BOSSES=${JSON.stringify(bosses,null,2)};\n`;
+validateBossCatalog(regions);
+const bosses=regions.flatMap(region=>region.bosses.map(boss=>({region:region.region_name,name:boss.boss,place:boss.place||'',flagId:boss.flag_id,mainStory:Boolean(boss.main_story),remembrance:Boolean(boss.rememberance??boss.remembrance),greatRune:Boolean(boss.great_rune),dlc:Boolean(region.dlc??boss.dlc??previous.find(b=>b.flagId===boss.flag_id)?.dlc)})));
+if(bosses.length!==207||bosses.filter(b=>b.dlc).length!==42)throw Error('Pinned catalog changed; audit new IDs and DLC classification before updating.');
+const snapshot={source:'BuLEEto/ER_Boss_Kill_Checklist',license:'MIT',verified:new Date().toISOString().slice(0,10),count:bosses.length,sha256:crypto.createHash('sha256').update(JSON.stringify(regions)).digest('hex')};
+const text=`// Generated from ${SOURCE}\n// Source project MIT licensed. Do not edit by hand.\nexport const GENERATED_BOSSES=${JSON.stringify(bosses,null,2)};\nexport const GENERATED_BOSSES_SNAPSHOT=Object.freeze(${JSON.stringify(snapshot)});\n`;
 await fs.writeFile(new URL('../content/generated-bosses.js',import.meta.url),text);
 console.log(`Wrote ${bosses.length} boss encounters.`);

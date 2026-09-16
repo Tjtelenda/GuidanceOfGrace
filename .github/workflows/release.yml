@@ -17,9 +17,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm install --ignore-scripts
-      - run: npm rebuild electron electron-builder
+      - run: npm ci
       - run: npm test
-      - run: npm run dist:win -- --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: npm run dist:win -- --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Guidance-of-Grace-Windows
+          path: dist/*.exe

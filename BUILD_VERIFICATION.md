@@ -1,105 +1,34 @@
-# Build verification — desktop V4 / v0.5.0
+# Build and verification record
 
-## Environment and fixture
+## Canonical source
 
-- Linux container, Node.js 22
-- Acceptance save: `/mnt/data/ER0000.co2`
-- Backup fixture: `/mnt/data/ER0000.co2.bak`
+- Canonical V5 archive SHA-256: `2cfcd0caabb1911dc4866d634e06121066ff563b62f88c6e66ca55d7a2f73e6c`.
+- Attached archive used because the named archive was not in Downloads. Project root: `guidance-of-grace-v5`.
+- All 51 entries in the archive's `SOURCE_MANIFEST.txt` verified before edits. That manifest describes the original archive, not the modified release.
+- Obsolete V4 chunked handoff was not used.
+- Original source retained in Git commit `3af9e82`.
 
-The acceptance saves were opened read-only. No game-save write path exists in the project.
+## Completed proof on this PC
 
-## Full regression proof
+- Windows 11; production build tooling Node 24.19.0; Electron 44.3.0; electron-builder 26.16.1.
+- Original four test modules passed before implementation (Windows test-runner URL conversion fixed; assertions unchanged).
+- `npm test`: all five suites pass, including the added V5 suite.
+- `node --check app.js` and `node --check desktop/main.js`: pass.
+- `node tests/test-save-parser.mjs ..\elden-ring-work\backup-20260915-011419\76561198409539987\ER0000.co2`: original historical real-save assertions pass.
+- `node tests/test-local-save.mjs C:\Users\trent\AppData\Roaming\EldenRing\76561198409539987\ER0000.co2`: both parsers agree, all 207 encounter event addresses resolve, hash unchanged.
+- Current save at that check: ScarletThot Lv433, blessings 10/5; Bonk-naza Lv11, 0/0; A Mohg Us Lv61, 0/0. The older fixture retains Lv23 and is tested separately.
+- Current-save hash at that check: `95f5823a11d071864fdcad0c198b6c04b5492c4d102712fe07290f0b9bce3197`. Gameplay after this test will naturally change it.
+- Trusted encounter network update succeeded: 207 records, content version `ba0fd97e989d7b19c9d338106d98aaeb6bdf7fa0859a88aedef1fffc6c88e14e`.
+- Local extraction/import: 14,481 indexed records; three local map layers extracted with zero failed tiles. Coverage limitations are in LOCAL_KNOWLEDGE.md.
+- NSIS builds 0.5.0 and 0.5.1 succeeded, and both installers ran with exit code 0.
+- Installed path: `%LOCALAPPDATA%\Programs\Guidance of Grace\Guidance of Grace.exe`.
+- Start Menu shortcut verified: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Guidance of Grace.lnk`.
+- Packaged launch and journey chooser visually verified. `appInfo` confirmed the installed `resources\app.asar` path, not a development copy.
 
-Executed:
+## Acceptance still in progress — not a completion claim
 
-```bash
-cd /mnt/data/elden-ring-companion
-node --check app.js
-node --check content/mending-paths.js
-node --check desktop/save-monitor.js
-node tests/run.mjs
-node tests/test-save-parser.mjs /mnt/data/ER0000.co2
-```
+The installed acceptance script exposed a character-chooser timeout after adding imported marker flags. Source now caches the event lookup table and skips unsupported imported flag blocks instead of failing the character parse. These changes, plus subsequent spoiler/lifecycle refinements, are newer than the installed 0.5.1 build and still require rebuild/reinstallation and rerunning installed acceptance.
 
-Result:
+The user is playing Elden Ring and explicitly requested background work only. The companion is closed. No visible launches, hotkey tests, new game extraction, live-save reads or heavy installer builds are being run during that restriction. Final installed search/journey/map/overlay/persistence/update checks and final installer hash remain pending.
 
-```text
-PASS: 39 NPC threads, 14 progression warnings, current-thread gating, spoiler data, evidence keys, and map metadata are internally consistent.
-PASS: 12 DLC NPC threads, 6 DLC transition warnings, story/glossary, level guidance, videos, and quest-item links are internally coherent.
-PASS: single/co-op settings, Story Host rules, host/joiner confidence, game detection, save diffs, readiness, and overlay notification rules.
-PASS: required desktop/story/UI surfaces exist; save watching is read-only; no process-memory injection; cloud scaffold uses RLS and no privileged browser credential.
-PASS: parsed supplied Seamless save, blessing levels, boss-approach/world-state flags, conservative progression, malformed-file guard, and backup parity.
-```
-
-## DLC blessing acceptance
-
-The dynamic PlayerGameData locator and read-only blessing parser returned:
-
-```text
-ScarletThot   Scadutree 10 / Revered Spirit Ash 5
-Bonk-naza     Scadutree 0  / Revered Spirit Ash 0
-A Mohg Us     Scadutree 0  / Revered Spirit Ash 0
-```
-
-These assertions are part of `tests/test-save-parser.mjs`.
-
-## V4 behavior explicitly protected
-
-- Single Player and Seamless mode normalization.
-- Story Host / Joiner dialogue coordination rule.
-- Single Player/Story Host evidence versus cautious Joiner shared-world evidence.
-- Two clickable nearby-NPC threads in the overlay.
-- Second-monitor NPC tracker and veiled future checkpoints.
-- Mending Paths remain hidden until relevant and undiscovered ending paths render as veiled cards.
-- Major-challenge naming policy: upcoming boss name is hidden outside Full Guide.
-- Optional boss help is folded under a themed disclosure.
-- Session time budget and estimates.
-- Desktop full active event IDs feed Journey Ledger auto-checks.
-- Scadutree/Revered Spirit blessing parsing.
-- Original V3 real-save regressions.
-
-## Static trust-boundary proof
-
-Executed scans found:
-
-```text
-HTML IDs: 108 unique / 108 total
-save-write scan: PASS
-process-memory/injection scan: PASS
-save files inside project: none
-```
-
-The automated static test also verifies context-isolated preload use, Supabase RLS scaffolding, and no privileged cloud credential in renderer code.
-
-## Journey Ledger catalog sync
-
-Attempted:
-
-```bash
-node scripts/sync-boss-catalog.mjs
-```
-
-The container cannot resolve `raw.githubusercontent.com` and returned `getaddrinfo EAI_AGAIN`, so `content/generated-bosses.js` remains an explicit placeholder in this snapshot. The source pipeline and UI are ready, but Work/CI must run the sync in a networked environment before the release may claim exhaustive boss/sub-boss coverage.
-
-Upstream: `BuLEEto/ER_Boss_Kill_Checklist` (MIT). The separate non-boss POI/dungeon/map audit remains a Work acceptance item and should prefer extracting map/marker data from the user's own game install rather than redistributing FromSoftware assets.
-
-## Electron / Windows packaging limitation
-
-This environment cannot reliably install/resolve npm packages, so it cannot honestly prove:
-
-- Electron rendering on Windows;
-- global hotkey behavior over Elden Ring;
-- Windows launcher/process discovery;
-- live watcher behavior through the installed npm parser package;
-- NSIS packaging;
-- GitHub Release updater behavior.
-
-Those are explicit Work tasks in `WORK_HANDOFF.md`.
-
-## Final simplification / diff review
-
-Ponytail is not installed or exposed in this session (`command -v ponytail` and a local skill/file search returned nothing), so the requested Ponytail ultra/final-review run cannot be claimed. A manual scope/security/simplification review was performed instead.
-
-The review fixed one root-cause completion bug: normalized desktop saves now expose every active `eventId`, allowing Journey Ledger to auto-check generated encounter flags. It also reduced the overlay from five NPC suggestions to the requested two and corrected Journey Ledger layout/accessibility after adding optional boss disclosures.
-
-No unrelated files, debug breakpoints, game saves, build outputs, or backup copies are included in the project directory.
+Ponytail was not available among installed tools/skills/workflows. A manual full-diff review is being performed; no Ponytail review is claimed.

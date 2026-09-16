@@ -1,7 +1,7 @@
 {
   "name": "guidance-of-grace",
   "productName": "Guidance of Grace",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Offline spoiler-light Elden Ring and Seamless Co-op companion with read-only save tracking and an optional in-game overlay.",
   "private": true,
   "type": "module",
@@ -38,24 +38,22 @@
       "content/**/*",
       "desktop/**/*",
       "README.md",
+      "LOCAL_KNOWLEDGE.md",
       "THIRD_PARTY_NOTICES.md",
       "package.json"
     ],
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "desktop/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "Tjtelenda",
-      "repo": "guidance-of-grace"
     }
-  }
+  },
+  "author": "Guidance of Grace contributors"
 }

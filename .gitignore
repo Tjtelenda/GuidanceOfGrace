@@ -1,4 +1,12 @@
 node_modules/
+.local-tools/
+.npm-cache/
+*.grace
+*.previous
+*.tmp
+.env*
+acceptance-artifacts/
+local-catalog.json
 dist/
 release/
 *.co2

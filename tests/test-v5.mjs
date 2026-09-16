@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { GENERATED_BOSSES } from '../content/generated-bosses.js';
+import { FORGE_SUPPLY } from '../content/forge-supply.js';
+import { QUESTS } from '../data.js';
+import { QUEST_ITEM_LINKS } from '../content/item-links.js';
+import { buildKnowledgeIndex, searchKnowledge } from '../content/knowledge-index.js';
+import { deriveEncounterLocations } from '../content/completion-catalog.js';
+import { JourneyStore } from '../desktop/journey-store.js';
+import { KnowledgeUpdater, normalizeImportedMarkers } from '../desktop/knowledge-updater.js';
+import { SaveMonitor, normalizeDesktopSave } from '../desktop/save-monitor.js';
+import { GameLifecycle } from '../desktop/game-lifecycle.js';
+import { readBlessingLevels, playerGameDataOffset } from '../save-parser.js';
+import { planSession } from '../content/session-planner.js';
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'grace-regression-'));
+const pause=ms=>new Promise(r=>setTimeout(r,ms));
+try {
+  assert.equal(GENERATED_BOSSES.length,207);assert.equal(GENERATED_BOSSES.filter(b=>b.dlc).length,42);
+  assert.equal(new Set(GENERATED_BOSSES.map(b=>b.flagId)).size,207);
+  assert.ok(deriveEncounterLocations(GENERATED_BOSSES).some(x=>x.type==='evergaol'));
+  assert.equal(FORGE_SUPPLY.filter(x=>x.family==='regular').length,4);assert.equal(FORGE_SUPPLY.filter(x=>x.family==='somber').length,5);
+  const index=buildKnowledgeIndex({bosses:GENERATED_BOSSES,quests:QUESTS,forgeSupply:FORGE_SUPPLY,questItems:QUEST_ITEM_LINKS});
+  for(const query of ['Godrick','catacombs','Ranni','bell bearing','smithing stone 3'])assert.ok(searchKnowledge(index,query).length,query);
+  assert.ok(searchKnowledge(index,'smithing stone 3').some(x=>x.forgeId==='smithing-2'));
+  const short=planSession({minutes:30,legacy:true,risk:true,forge:true,quest:{name:'Fixture',hint:'Current thread',endingPriority:true}});assert.ok(short.every(c=>c.minutes<=30));assert.equal(short[0].priority,100);assert.ok(!short.some(c=>/legacy/.test(c.title)));
+  const journeys=new JourneyStore(dir),solo=journeys.create({playMode:'single',state:{showAll:false}}),coop=journeys.create({playMode:'seamless',state:{role:'host',showAll:true}});
+  journeys.save(coop.id,{role:'joiner',showAll:true});assert.deepEqual(journeys.load(solo.id).state,{showAll:false});
+  const exported=path.join(dir,'export.grace');journeys.export(coop.id,exported);const imported=journeys.import(exported);assert.notEqual(imported.id,coop.id);assert.deepEqual(imported.state,journeys.load(coop.id).state);
+  assert.throws(()=>journeys.export(solo.id,path.join(dir,'forbidden.sl2')));
+  const catalog=[{region_name:'Fixture',bosses:GENERATED_BOSSES.map(b=>({boss:b.name,flag_id:b.flagId}))}];
+  let payload=JSON.stringify(catalog);const knowledge=new KnowledgeUpdater(dir,{fetcher:async()=>({ok:true,text:async()=>payload})});
+  await knowledge.check();assert.equal(knowledge.encounters().length,207);const good=knowledge.status().version;
+  payload='{}';await knowledge.check();assert.equal(knowledge.status().version,good);assert.equal(knowledge.encounters().length,207);
+  payload=JSON.stringify(catalog);await knowledge.check();fs.writeFileSync(path.join(dir,'knowledge','encounters.json'),'corrupt');assert.equal(knowledge.encounters().length,207);
+  assert.throws(()=>normalizeImportedMarkers({records:[]}));assert.equal(new KnowledgeUpdater(path.join(dir,'offline'),{fetcher:async()=>{throw Error('offline')}}).encounters().length,207);
+  const unknown=normalizeDesktopSave({activeProfiles:[true],profileSummaries:[{name:'Fixture'}],slots:[{eventFlags:[],eventFlagUint8Array:new Uint8Array(0x1bf99f)}]},null,[4294967295]);assert.ok(unknown[0].unsupportedEventIds.includes(4294967295));
+  const fixture=new Uint8Array(0x280310),player=playerGameDataOffset(fixture,0);assert.ok(player);new DataView(fixture.buffer).setUint32(player+0x60,50,true);
+  const magic=[0,255,255,255,255,...Array(12).fill(0),...[0,1,2].flatMap(()=>[255,255,255,255,...Array(12).fill(0)])];fixture.set(magic,player+431);fixture[player+244]=10;fixture[player+245]=5;
+  assert.deepEqual(readBlessingLevels(fixture,0),{scaduLevel:10,spiritBlessingLevel:5});fixture[player+245]=11;assert.equal(readBlessingLevels(fixture,0).scaduLevel,null);assert.equal(playerGameDataOffset(fixture,10),null);
+  // A synthetic companion-owned fixture only: never write a user's game save.
+  const fake=path.join(dir,'synthetic.co2');fs.writeFileSync(fake,'fixture');let reads=0;
+  const monitor=new SaveMonitor(()=>reads++,{parseFile:async()=>[],debounceMs:20,stableMs:5});monitor.watch(fake);await pause(60);reads=0;monitor.schedule();monitor.schedule();monitor.schedule();await pause(70);assert.equal(reads,1);monitor.stop();
+  const sequence=[];const lifecycle=new GameLifecycle({delay:10,readFinal:async()=>{await pause(5);sequence.push('read')},onClose:()=>sequence.push('close')});lifecycle.change(true);lifecycle.change(false);await pause(40);assert.deepEqual(sequence,['read','close']);lifecycle.stop();
+  console.log('PASS: V5 catalog/search, journey isolation/export/import, update rollback/offline, structural blessing bounds, watcher debounce and final read.');
+} finally {fs.rmSync(dir,{recursive:true,force:true});}

@@ -2,13 +2,15 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { app, BrowserWindow, globalShortcut, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, dialog, shell, Tray, Menu, nativeImage } from 'electron';
 import updater from 'electron-updater';
 import { SettingsStore } from './settings-store.js';
 import { JourneyStore } from './journey-store.js';
 import { KnowledgeUpdater } from './knowledge-updater.js';
-import { SaveMonitor, discoverSaveFiles } from './save-monitor.js';
+import { SaveMonitor, discoverSaveFiles, parseSaveFile } from './save-monitor.js';
 import { GameMonitor } from './game-monitor.js';
+import { GameLifecycle } from './game-lifecycle.js';
+import { regenerateLocal } from './local-generator.js';
 import { discoverGameInstall } from './game-paths.js';
 import { diffSnapshot, shouldNotify } from './core.js';
 
@@ -30,6 +32,9 @@ let isQuitting = false;
 let gameWasRunning = false;
 let lastAutoNoticeSignature = '';
 let overlayMode = 'guide';
+let tray=null;
+let localGeneration=null;
+let finalSaveAcknowledged=null;
 
 const send = (channel, payload) => {
   for (const win of [mainWindow, overlayWindow]) if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -41,7 +46,7 @@ function secureWindow(win) {
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith('file://')) { event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url); }
+    event.preventDefault(); if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
   });
 }
 
@@ -89,9 +94,11 @@ function toggleOverlay(force, mode='guide') {
 function registerHotkeys(settings = store.get()) {
   globalShortcut.unregisterAll();
   if (!settings.overlayEnabled) return true;
-  const guideOk = globalShortcut.register(settings.overlayHotkey, () => toggleOverlay(undefined, 'guide'));
-  const mapOk = globalShortcut.register(settings.mapOverlayHotkey, () => toggleOverlay(undefined, 'map'));
-  return guideOk && mapOk;
+  try {
+    const guideOk = globalShortcut.register(settings.overlayHotkey, () => toggleOverlay(undefined, 'guide'));
+    const mapOk = globalShortcut.register(settings.mapOverlayHotkey, () => toggleOverlay(undefined, 'map'));
+    return guideOk && mapOk;
+  } catch {return false;}
 }
 
 function configureLoginItem() {
@@ -103,34 +110,39 @@ function savePathOrAuto() {
   const settings = store.get(), preferred = settings.playMode === 'single' ? 'sl2' : 'co2';
   if (settings.selectedSavePath && fs.existsSync(settings.selectedSavePath) && path.extname(settings.selectedSavePath).slice(1).toLowerCase() === preferred) return settings.selectedSavePath;
   const saves = discoverSaveFiles();
-  return saves.find(item => item.type === preferred)?.path ?? (settings.selectedSavePath && fs.existsSync(settings.selectedSavePath) ? settings.selectedSavePath : saves[0]?.path ?? '');
+  return saves.find(item => item.type === preferred)?.path ?? '';
 }
 
-const saveMonitor = new SaveMonitor(slots => {
+const saveMonitor = new SaveMonitor((slots,filePath) => {
   const settings = store.get();
   const selected = Number.isInteger(settings.selectedSlot) ? slots.find(slot => slot.slot === settings.selectedSlot) : slots[0];
   const previous = Number.isInteger(settings.selectedSlot) ? lastSlots.find(slot => slot.slot === settings.selectedSlot) : lastSlots[0];
   const diff = selected ? diffSnapshot(previous, selected) : { changed: [], firstRead: true };
   lastSlots = slots;
-  send('desktop:save', { slots, selected, diff, filePath: saveMonitor.filePath });
-});
+  send('desktop:save', { slots, selected, diff, filePath, journeyId:settings.activeJourneyId });
+},{parseFile:file=>parseSaveFile(file,knowledgeUpdater?.catalog().map(r=>r.eventId).filter(Number.isSafeInteger)??[]),onError:error=>send('desktop:save-error',{message:error.message})});
 
+async function readFinalSnapshot(){
+  const journeyId=store.get().activeJourneyId;
+  if(!journeyId||!saveMonitor.filePath)return;
+  let timer;
+  const saved=new Promise(resolve=>{finalSaveAcknowledged=id=>{if(id===journeyId)resolve()};timer=setTimeout(resolve,3000);});
+  try{await saveMonitor.readNow();await saved;}finally{clearTimeout(timer);finalSaveAcknowledged=null;}
+}
+const lifecycle=new GameLifecycle({readFinal:()=>readFinalSnapshot().catch(()=>{}),onClose:()=>{if(store.get().closeAfterGame){if(store.get().keepRunningInBackground){mainWindow?.hide();overlayWindow?.hide();}else{isQuitting=true;app.quit();}}}});
 const gameMonitor = new GameMonitor(async running => {
+  lifecycle.change(running);
   const settings = store.get();
   send('desktop:game', { running });
   if (running && !gameWasRunning) {
     gameWasRunning = true;
+    if(settings.wakeWithGame)mainWindow?.show();
     if (settings.wakeWithGame && !saveMonitor.filePath) {
       const save = savePathOrAuto();
       if (save) { store.set({ selectedSavePath: save }); saveMonitor.watch(save); }
     }
   } else if (!running && gameWasRunning) {
     gameWasRunning = false;
-    setTimeout(() => void saveMonitor.readNow().catch(() => {}), 2500);
-    if (settings.closeAfterGame) setTimeout(() => {
-      if (settings.startWithWindows) { mainWindow?.hide(); overlayWindow?.hide(); }
-      else { isQuitting = true; app.quit(); }
-    }, 4500);
   }
 });
 
@@ -160,27 +172,45 @@ function configureUpdater() {
 }
 
 function setupIpc() {
+  ipcMain.handle('desktop:generate-local',()=>{if(!localGeneration)localGeneration=regenerateLocal(app.getPath('userData'),knowledgeUpdater,message=>send('desktop:generation',{message})).finally(()=>{localGeneration=null});return localGeneration;});
+  ipcMain.handle('desktop:local-map',(_event,target)=>{
+    if(!['M00','M01','M10'].includes(target?.layer)||!Number.isFinite(target.x)||!Number.isFinite(target.y)||target.x<0||target.y<0||target.x>10496||target.y>10496)return null;
+    const file=path.join(app.getPath('userData'),'knowledge','maps',`${target.layer}.png`);
+    if(!fs.existsSync(file))return null;
+    const img=nativeImage.createFromPath(file),size=img.getSize(),scale=size.width/10496;
+    if(img.isEmpty())return null;
+    const width=Math.min(600,size.width),height=Math.min(450,size.height),x=Math.max(0,Math.min(size.width-width,Math.round(target.x*scale-width/2))),y=Math.max(0,Math.min(size.height-height,Math.round(target.y*scale-height/2)));
+    return {image:img.crop({x,y,width,height}).toDataURL(),x:(target.x*scale-x)/width*100,y:(target.y*scale-y)/height*100};
+  });
+  ipcMain.handle('desktop:app-info',()=>({version:app.getVersion(),packaged:app.isPackaged,appPath:app.getAppPath(),userData:app.getPath('userData')}));
   ipcMain.handle('desktop:get-settings', () => store.get());
   ipcMain.handle('desktop:set-settings', (_event, patch) => {
     const before = store.get();
-    const next = store.set(patch ?? {});
+    const candidate={...before,...patch};
+    if(candidate.selectedSavePath&&!new RegExp(candidate.playMode==='single'?'\\.sl2$':'\\.co2$','i').test(candidate.selectedSavePath))candidate.selectedSavePath='';
+    const shortcutsChanged = ['overlayHotkey','mapOverlayHotkey','overlayEnabled'].some(key=>candidate[key]!==before[key]);
+    if(shortcutsChanged&&!registerHotkeys(candidate)){registerHotkeys(before);throw new Error('Overlay shortcuts are invalid or already in use. Choose different shortcuts.');}
+    let next;
+    try { next = store.set(candidate); }
+    catch(error) { if(shortcutsChanged)registerHotkeys(before);throw error; }
     if (next.startWithWindows !== before.startWithWindows) configureLoginItem();
-    if (next.overlayHotkey !== before.overlayHotkey || next.mapOverlayHotkey !== before.mapOverlayHotkey || next.overlayEnabled !== before.overlayEnabled) registerHotkeys(next);
-    if (next.playMode !== before.playMode) { const save=savePathOrAuto(); if(save&&save!==next.selectedSavePath){store.set({selectedSavePath:save});saveMonitor.watch(save)} }
+    if (next.playMode !== before.playMode) { const save=savePathOrAuto();store.set({selectedSavePath:save});lastSlots=[];saveMonitor.watch(save); }
     else if (next.selectedSavePath !== before.selectedSavePath) saveMonitor.watch(next.selectedSavePath);
     autoUpdater.autoDownload = next.autoDownloadUpdates;
-    return next;
+    return store.get();
   });
   ipcMain.handle('desktop:discover-saves', () => discoverSaveFiles());
   ipcMain.handle('desktop:choose-save', async () => {
     const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose Elden Ring save', properties: ['openFile'], filters: [{ name: 'Elden Ring saves', extensions: ['co2', 'sl2'] }] });
     if (result.canceled || !result.filePaths[0]) return null;
+    if(!new RegExp(store.get().playMode==='single'?'\\.sl2$':'\\.co2$','i').test(result.filePaths[0]))throw new Error('The save type must match this journey mode.');
     store.set({ selectedSavePath: result.filePaths[0] });
     saveMonitor.watch(result.filePaths[0]);
     return result.filePaths[0];
   });
   ipcMain.handle('desktop:use-save', (_event, filePath) => {
     if (!filePath || !fs.existsSync(filePath)) throw new Error('Save file not found.');
+    if(!new RegExp(store.get().playMode==='single'?'\\.sl2$':'\\.co2$','i').test(filePath))throw new Error('The save type must match this journey mode.');
     store.set({ selectedSavePath: filePath }); saveMonitor.watch(filePath); return filePath;
   });
   ipcMain.handle('desktop:read-save', () => saveMonitor.readNow());
@@ -212,8 +242,14 @@ function setupIpc() {
   ipcMain.handle('desktop:toggle-overlay', (_event, mode='guide') => toggleOverlay(undefined, mode === 'map' ? 'map' : 'guide'));
   ipcMain.handle('desktop:list-journeys', () => journeyStore.list());
   ipcMain.handle('desktop:create-journey', (_event, input) => journeyStore.create(input ?? {}));
-  ipcMain.handle('desktop:load-journey', (_event, id) => journeyStore.load(id));
-  ipcMain.handle('desktop:save-journey', (_event, id, state, patch) => journeyStore.save(id, state, patch ?? {}));
+  ipcMain.handle('desktop:load-journey', (_event, id) => {
+    const journey=journeyStore.load(id),p=journey.state.profiles?.[journey.state.active??0]??{};
+    saveMonitor.stop();lastSlots=[];overlayPayload={area:'Choose a character',warnings:[],npcs:[]};send('desktop:overlay-payload',overlayPayload);
+    store.set({activeJourneyId:id,playMode:journey.playMode,multiplayerRole:p.role??'joiner',selectedSavePath:p.savePath??'',selectedSlot:p.character?.slot??null});
+    const save=savePathOrAuto();store.set({selectedSavePath:save});saveMonitor.watch(save);
+    return journey;
+  });
+  ipcMain.handle('desktop:save-journey', (_event, id, state, patch) => {const saved=journeyStore.save(id,state,patch??{});finalSaveAcknowledged?.(id);return saved;});
   ipcMain.handle('desktop:import-journey', async () => {
     const result=await dialog.showOpenDialog(mainWindow,{title:'Import Guidance of Grace journey',properties:['openFile'],filters:[{name:'Guidance of Grace Journey',extensions:['grace']}]});
     if(result.canceled||!result.filePaths[0])return null;return journeyStore.import(result.filePaths[0]);
@@ -224,13 +260,15 @@ function setupIpc() {
   });
   ipcMain.handle('desktop:knowledge-status', () => knowledgeUpdater.status());
   ipcMain.handle('desktop:knowledge-catalog', () => knowledgeUpdater.catalog());
+  ipcMain.handle('desktop:knowledge-encounters', () => knowledgeUpdater.encounters());
   ipcMain.handle('desktop:update-knowledge', () => knowledgeUpdater.check());
   ipcMain.handle('desktop:import-knowledge', async () => {const result=await dialog.showOpenDialog(mainWindow,{title:'Import searchable Elden Ring marker/item catalog',properties:['openFile'],filters:[{name:'JSON catalog',extensions:['json']}]});if(result.canceled||!result.filePaths[0])return null;return knowledgeUpdater.importMarkers(result.filePaths[0]);});
   ipcMain.handle('desktop:open-game-movies', async () => {const detected=discoverGameInstall(),movieDir=detected.gameDir?path.join(detected.gameDir,'movie'):'';if(!movieDir||!fs.existsSync(movieDir))throw new Error('Elden Ring movie folder was not found.');return shell.openPath(movieDir);});
   ipcMain.handle('desktop:show-main', () => { mainWindow?.show(); mainWindow?.focus(); return true; });
   ipcMain.handle('desktop:check-updates', async () => {
     if (!app.isPackaged) return { state: 'dev', message: 'Update checks run in packaged builds.' };
-    return autoUpdater.checkForUpdates();
+    if(!fs.existsSync(path.join(process.resourcesPath,'app-update.yml')))return {state:'unconfigured',message:'No release repository is configured yet. This installed version remains usable offline.'};
+    try{await autoUpdater.checkForUpdates();return {state:'checked',message:'Update check completed.'};}catch(error){return {state:'error',message:'Release feed unavailable. Installed version remains usable offline.'};}
   });
   ipcMain.handle('desktop:install-update', () => { if (app.isPackaged) autoUpdater.quitAndInstall(); return true; });
   ipcMain.handle('desktop:open-external', (_event, url) => { if (/^https?:\/\//i.test(url)) return shell.openExternal(url); return false; });
@@ -244,21 +282,22 @@ app.on('second-instance', (_event, argv) => {
 });
 
 app.whenReady().then(() => {
+  if(!gotLock)return;
   store = new SettingsStore(app.getPath('userData'));
   journeyStore = new JourneyStore(app.getPath('userData'));
   knowledgeUpdater = new KnowledgeUpdater(app.getPath('userData'));
   createMainWindow(); createOverlayWindow(); setupIpc(); configureUpdater(); configureLoginItem();
+  const icon=nativeImage.createFromPath(path.join(__dirname,'icon.png'));
+  tray=new Tray(icon);tray.setToolTip('Guidance of Grace');tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Guidance of Grace',click:()=>{mainWindow?.show();mainWindow?.focus()}},{label:'Toggle overlay',click:()=>toggleOverlay()},{type:'separator'},{label:'Quit',click:()=>{isQuitting=true;app.quit()}}]));tray.on('double-click',()=>mainWindow?.show());
   registerHotkeys(store.get());
-  const save = savePathOrAuto();
-  if (save) { store.set({ selectedSavePath: save }); saveMonitor.watch(save); }
   gameMonitor.start();
   const launchIndex = process.argv.indexOf('--launch-mode');
   if (launchIndex >= 0 && process.argv[launchIndex + 1]) setTimeout(() => launchExecutable(configuredGame(process.argv[launchIndex + 1])), 800);
-  if (app.isPackaged && store.get().checkForUpdates) setTimeout(() => void autoUpdater.checkForUpdates().catch(() => {}), 5000);
+  if (app.isPackaged && fs.existsSync(path.join(process.resourcesPath,'app-update.yml')) && store.get().checkForUpdates) setTimeout(() => void autoUpdater.checkForUpdates().catch(() => {}), 5000);
   if (store.get().knowledgeAutoUpdate) setTimeout(() => void knowledgeUpdater.check().then(status=>send('desktop:knowledge',status)).catch(()=>{}), 8000);
 });
 
-app.on('before-quit', () => { isQuitting = true; saveMonitor.stop(); gameMonitor.stop(); globalShortcut.unregisterAll(); });
+app.on('before-quit', () => { isQuitting = true; lifecycle.stop();saveMonitor.stop(); gameMonitor.stop(); globalShortcut.unregisterAll(); });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !store?.get().keepRunningInBackground) app.quit();
 });

@@ -8,7 +8,7 @@ Guidance of Grace separates reusable open-source data, factual save-format refer
 Used as the runtime desktop event-flag parser and a cross-check for BND4/SL2 layout, map names, and event IDs.
 
 ### BuLEEto/ER_Boss_Kill_Checklist — MIT
-Used as the intended vendored source for the complete boss/sub-boss event-flag catalog. Its project already supports read-only live save watching and Seamless saves. `scripts/sync-boss-catalog.mjs` converts its `bosses.json` into our offline `content/generated-bosses.js` format.
+Used as the vendored source for the complete boss/sub-boss event-flag catalog. Its project already supports read-only live save watching and Seamless saves. `scripts/sync-boss-catalog.mjs` converts its `bosses.json` into our offline `content/generated-bosses.js` format.
 
 ### mhogeveen/er-quest-tracker — MIT
 Reviewed as a reference for NPC quest organization. Guidance of Grace uses its own spoiler-gated data model and UI.
@@ -19,12 +19,12 @@ Reviewed for automatic checklist ideas and save-driven completion patterns.
 ## Technical format reference
 
 ### oisis/EldenRing-SaveForge — GPL-3.0
-Used only as a **format research/reference source**, not copied into this project. Its documented PlayerGameData layout independently confirms the dynamic marker and the DLC blessing fields at `-187` (Scadutree) and `-186` (Revered Spirit Ash). Guidance of Grace contains its own small read-only implementation of those factual offsets.
+Used only as a **format research/reference source**, not copied into this project. Its documented PlayerGameData layout informs the structural locator. The blessing offsets `-187` (Scadutree) and `-186` (Revered Spirit Ash) were separately checked against local saves and the independent runtime parser; the specification alone is not proof of those offsets. Guidance of Grace contains its own small read-only implementation of those factual offsets.
 
 ## Map/live-sync projects reviewed
 
 ### egormagurin/EldenRingMap
-Useful design precedent for live map sync and, importantly, for generating map data/assets from the user's own Elden Ring installation instead of redistributing copyrighted game art. License must be verified before any code reuse; currently treated as ideas/research only.
+Useful design precedent for live map sync and, importantly, for generating map data/assets from the user's own Elden Ring installation instead of redistributing copyrighted game art. No standalone redistribution license was confirmed. Selected extraction scripts run only from an ignored local checkout; none are distributed with this app. See LOCAL_KNOWLEDGE.md for the pinned commit, local outputs and coverage limits.
 
 ### jw-ofs/elden-ring-map
 Reviewed for comprehensive map/marker/quest data organization. License/asset provenance must be verified before reuse; no code is currently copied.
@@ -49,7 +49,7 @@ Do not commit extracted FromSoftware map tiles, icons, screenshots, or other gam
 
 - **Ghostbroker/elden-ring-progression-tracker — GPL-3.0.** Strong cross-check for scope: 208 bosses, 418 Sites of Grace, base game + Shadow of the Erdtree, and Seamless `.co2` support. Because it is GPL-3.0, no code/data is copied into Guidance of Grace without deliberately accepting GPL obligations.
 - **Evendyce/Elden-Ring-Tracker — MIT code / CC BY-NC-SA 4.0 guide content.** Useful reference for spoiler-aware route/checklist UX and stable route IDs. Its guide prose is not copied.
-- **egormagurin/EldenRingMap.** Strong reference for locally extracting map art/icons/markers from the user's own Elden Ring installation and live-syncing thousands of markers. No license was confirmed in the repository view used for this audit, so it is treated as research only.
+- **egormagurin/EldenRingMap.** Strong reference for locally extracting map art/icons/markers from the user's own Elden Ring installation and live-syncing thousands of markers. No redistribution license was confirmed. Selected extraction scripts were used locally, outside the distributed application; see LOCAL_KNOWLEDGE.md.
 - **jw-ofs/elden-ring-map.** Strong reference for map marker density, quest fly-to behavior, and offline map UX. No reusable license was confirmed in the repository view used for this audit, so it is treated as research only.
 
 The preferred release combination is therefore: MIT boss/event catalog from BuLEEto + MIT runtime parser from zebbedaja + our original spoiler/story logic + a locally generated map/POI layer derived from the player's own game install.

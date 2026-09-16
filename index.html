@@ -15,9 +15,9 @@
   <header class="topbar">
     <button class="brand reset-button" data-view="home" aria-label="Guidance of Grace home">
       <span class="brand-mark">✦</span>
-      <span><strong>Guidance of Grace</strong><small>spoiler-light co-op companion</small></span>
+      <span><strong>Guidance of Grace</strong><small>offline journey companion</small></span>
     </button>
-    <div class="top-actions">
+    <div class="top-actions"><label class="show-all-control"><input id="globalShowAll" type="checkbox"> Show All</label>
       <label class="profile-picker"><span>View</span><select id="profileSelect" aria-label="Current profile"></select></label>
       <label class="spoiler-picker"><span>Spoilers</span><select id="spoilerSelect" aria-label="Spoiler detail"><option value="low">Low</option><option value="balanced">Balanced</option><option value="full">Full guide</option></select></label>
       <button id="saveButton" class="button primary">Connect save</button>
@@ -190,7 +190,7 @@
         <section class="panel settings-card"><p class="eyebrow">SAVE WATCHER</p><h2>Character profile</h2><p id="desktopSavePath" class="path-copy">Auto-detecting save…</p><label>Character<select id="desktopSlot"></select></label><label>Scadutree Blessing<input id="scaduLevel" type="number" min="0" max="20" step="1" placeholder="Reading from save…"></label><p id="scaduHelp" class="muted-copy">Guidance of Grace reads Scadutree and Revered Spirit Ash blessing levels directly from the character slot when the dynamic marker is available. Manual entry is only a fallback.</p><div class="button-row"><button id="chooseDesktopSave" class="button ghost">Choose save</button><button id="refreshDesktopSave" class="button ghost">Read now</button></div></section>
         <section class="panel settings-card"><p class="eyebrow">GAME LIFECYCLE</p><h2>Start and stop with Elden Ring</h2><label><input id="wakeWithGame" type="checkbox"> Wake when Elden Ring / Seamless starts</label><label><input id="closeAfterGame" type="checkbox"> Close after the final save read when the game exits</label><label><input id="keepRunningInBackground" type="checkbox"> Keep running in the background when the window closes</label><label><input id="startWithWindows" type="checkbox"> Start quietly with Windows</label></section>
         <section class="panel settings-card"><p class="eyebrow">LAUNCHERS</p><h2>Open game + companion together</h2><p id="gamePathStatus" class="muted-copy">Looking for your Steam install…</p><div class="button-row"><button id="launchSeamless" class="button primary">Launch Seamless</button><button id="launchVanilla" class="button ghost">Launch vanilla</button></div><div class="button-row"><button id="chooseSeamless" class="text-button">Choose ersc_launcher.exe</button><button id="chooseVanilla" class="text-button">Choose game launcher</button></div><div class="button-row"><button id="shortcutSeamless" class="text-button">Create Seamless desktop shortcut</button><button id="shortcutVanilla" class="text-button">Create vanilla shortcut</button></div></section>
-        <section class="panel settings-card"><p class="eyebrow">UPDATES</p><h2>App + knowledge</h2><label><input id="checkForUpdates" type="checkbox"> Check GitHub Releases automatically</label><label><input id="autoDownloadUpdates" type="checkbox"> Download app updates automatically</label><label><input id="knowledgeAutoUpdate" type="checkbox"> Refresh licensed knowledge sources automatically</label><p id="updateStatus" class="muted-copy">App update status unavailable in the browser build.</p><p id="knowledgeStatus" class="muted-copy">Knowledge snapshot is bundled for offline use.</p><div class="button-row"><button id="checkUpdates" class="button ghost">Check app update</button><button id="checkKnowledge" class="button ghost">Refresh knowledge</button><button id="importKnowledge" class="button ghost">Import game-data index</button><button id="installUpdate" class="button primary hidden">Install downloaded update</button></div></section>
+        <section class="panel settings-card"><p class="eyebrow">UPDATES</p><h2>App + knowledge</h2><label><input id="remotePortraits" type="checkbox"> Load optional remote community portraits</label><label><input id="checkForUpdates" type="checkbox"> Check GitHub Releases automatically</label><label><input id="autoDownloadUpdates" type="checkbox"> Download app updates automatically</label><label><input id="knowledgeAutoUpdate" type="checkbox"> Refresh licensed knowledge sources automatically</label><p id="updateStatus" class="muted-copy">App update status unavailable in the browser build.</p><p id="knowledgeStatus" class="muted-copy">Knowledge snapshot is bundled for offline use.</p><div class="button-row"><button id="checkUpdates" class="button ghost">Check app update</button><button id="checkKnowledge" class="button ghost">Update Knowledge</button><button id="generateLocal" class="button ghost">Generate from installed game</button><button id="importKnowledge" class="button ghost">Import game-data index</button><button id="installUpdate" class="button primary hidden">Install downloaded update</button></div></section>
       </div>
     </section>
   </main>
@@ -200,7 +200,7 @@
     <form method="dialog" class="dialog-card journey-dialog-card">
       <p class="eyebrow">CHOOSE A JOURNEY</p><h2>Which companion save are you playing?</h2><p>Guidance of Grace keeps Single Player and Seamless companion state separate. Elden Ring saves remain read-only.</p>
       <div id="journeyChoices" class="character-choices"></div>
-      <div class="button-row"><button type="button" id="journeyCreateSingle" class="button ghost">New Single Player</button><button type="button" id="journeyCreateSeamless" class="button ghost">New Seamless</button></div>
+      <div class="button-row"><button type="button" id="journeyCreateSingle" class="button ghost">New Single Player</button><button type="button" id="journeyCreateSeamless" class="button ghost">New Seamless</button><button type="button" id="journeyImportChooser" class="button ghost">Import Journey</button></div>
     </form>
   </dialog>
 
@@ -212,7 +212,7 @@
     </form>
   </dialog>
 
-  <footer><span>Guidance of Grace</span><span>Read-only save companion · artwork credits in THIRD_PARTY_NOTICES.md</span></footer>
+  <footer><span>Guidance of Grace · <span id="appVersion">Version 0.5.1</span></span><span>Read-only save companion · artwork credits in THIRD_PARTY_NOTICES.md</span></footer>
   <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,11 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { parse } from '@zebbedaja/er-save-parser';
+import { parse, getBstMap, getEventFlagState } from '@zebbedaja/er-save-parser';
 import { readBlessingLevels } from '../save-parser.js';
+import { GENERATED_BOSSES } from '../content/generated-bosses.js';
+import { TRACKED_FLAGS } from '../save-parser.js';
 
 const SAVE_NAMES = ['ER0000.co2', 'ER0000.sl2'];
 const WATCH_DEBOUNCE_MS = 1300;
+const EVENT_BST=getBstMap();
 
 export function discoverSaveFiles(appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')) {
   const root = path.join(appData, 'EldenRing');
@@ -23,14 +26,23 @@ function activeEventMap(slot) {
   return events;
 }
 
-export function normalizeDesktopSave(parsed, rawBytes = null) {
+export function normalizeDesktopSave(parsed, rawBytes = null, extraEventIds=[]) {
   const summaries = parsed.profileSummaries ?? [];
   const active = new Set((parsed.activeProfiles ?? []).map((value, index) => value ? index : null).filter(Number.isInteger));
   return (parsed.slots ?? []).map((slot, index) => {
     const summary = summaries[index] ?? {};
     const character = slot.character ?? {};
-    const rawName = character.characterName || summary.characterName || '';
-    if (!rawName && !active.has(index)) return null;
+    const rawName = (summary.name || character.characterName || '').split('\0')[0];
+    if (!active.has(index)) return null;
+    const ids=new Set((slot.eventFlags??[]).map(f=>f.id)),unsupportedEventIds=[];
+    slot.eventFlags??=[];
+    if(slot.eventFlagUint8Array)for(const id of new Set([...GENERATED_BOSSES.map(b=>b.flagId),...TRACKED_FLAGS.map(([id])=>id),...extraEventIds])){
+      if(!ids.has(id)){
+        if(!Number.isSafeInteger(id)||id<0||!EVENT_BST.has(Math.floor(id/1000))){unsupportedEventIds.push(id);continue;}
+        try{slot.eventFlags.push({id,state:getEventFlagState(EVENT_BST,slot.eventFlagUint8Array,id)});}
+        catch{unsupportedEventIds.push(id);}
+      }
+    }
     const name = rawName || `Slot ${index + 1}`;
     const blessings=rawBytes?readBlessingLevels(rawBytes,index):{scaduLevel:null,spiritBlessingLevel:null};
     return {
@@ -46,10 +58,11 @@ export function normalizeDesktopSave(parsed, rawBytes = null) {
       notAlone: Boolean(slot.notAloneFlag),
       totalDeathCount: slot.totalDeathCount ?? 0,
       ...blessings,
+      unsupportedEventIds,
       events: activeEventMap(slot),
       eventIds: (slot.eventFlags ?? []).filter(flag => flag.state).map(flag => flag.id),
       items: deriveItems(slot),
-      flags: deriveFlags(slot),
+      flags: {...Object.fromEntries(TRACKED_FLAGS.map(([id,key])=>[key,has(slot,id)])),...deriveFlags(slot)},
     };
   }).filter(Boolean);
 }
@@ -122,42 +135,58 @@ export function deriveFlags(slot) {
   return f;
 }
 
-export async function parseSaveFile(filePath) {
+export async function parseSaveFile(filePath, extraEventIds=[]) {
+  if(!/\.(sl2|co2)$/i.test(filePath))throw new Error('Choose a .sl2 or .co2 game save.');
   const buffer = await fs.promises.readFile(filePath);
+  if(buffer.length<0x19003b0+0x60000||buffer.toString('ascii',0,4)!=='BND4')throw new Error('Unsupported or incomplete PC game save.');
   const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-  return normalizeDesktopSave(parse(arrayBuffer, { logLevel: 'none' }), new Uint8Array(arrayBuffer));
+  return normalizeDesktopSave(parse(arrayBuffer, { logLevel: 'none', includeEventFlagUInt8Array:true }), new Uint8Array(arrayBuffer),extraEventIds);
 }
 
 export class SaveMonitor {
-  constructor(onSnapshot) {
+  constructor(onSnapshot, {parseFile=parseSaveFile,debounceMs=WATCH_DEBOUNCE_MS,stableMs=300,onError=()=>{}}={}) {
     this.onSnapshot = onSnapshot;
     this.filePath = '';
     this.watcher = null;
     this.timer = null;
+    this.generation=0;this.parseFile=parseFile;this.debounceMs=debounceMs;this.stableMs=stableMs;this.onError=onError;
   }
 
   async readNow() {
     if (!this.filePath) return [];
-    const slots = await parseSaveFile(this.filePath);
-    this.onSnapshot?.(slots);
+    const file=this.filePath,generation=this.generation;
+    const before=await fs.promises.stat(file);
+    await new Promise(resolve=>setTimeout(resolve,this.stableMs));
+    const stable=await fs.promises.stat(file);
+    if(before.size!==stable.size||before.mtimeMs!==stable.mtimeMs)throw new Error('Save is still being written; waiting for a stable read.');
+    const slots = await this.parseFile(file);
+    const after=await fs.promises.stat(file);
+    if(stable.size!==after.size||stable.mtimeMs!==after.mtimeMs)throw new Error('Save changed during parsing; waiting for the next read.');
+    if(generation!==this.generation)return [];
+    this.onSnapshot?.(slots,file);
     return slots;
   }
 
   watch(filePath) {
     this.stop();
+    if(filePath&&!/\.(sl2|co2)$/i.test(filePath))throw new Error('Choose a .sl2 or .co2 game save.');
     this.filePath = filePath;
     if (!filePath || !fs.existsSync(filePath)) return;
-    this.watcher = fs.watch(filePath, { persistent: false }, () => {
-      clearTimeout(this.timer);
-      this.timer = setTimeout(() => void this.readNow().catch(() => {}), WATCH_DEBOUNCE_MS);
+    this.watcher = fs.watch(path.dirname(filePath), { persistent: false }, (_event,name) => {
+      if(!name||String(name).toLowerCase()===path.basename(filePath).toLowerCase())this.schedule();
     });
-    void this.readNow();
+    this.watcher.on('error',this.onError);
+    this.schedule(0);
   }
 
+  schedule(delay=this.debounceMs,attempt=0){clearTimeout(this.timer);this.timer=setTimeout(()=>void this.readNow().catch(error=>{this.onError(error);if(attempt<5&&this.filePath)this.schedule(this.debounceMs,attempt+1)}),delay);}
+
   stop() {
+    this.generation++;
     clearTimeout(this.timer);
     this.timer = null;
     this.watcher?.close();
     this.watcher = null;
+    this.filePath='';
   }
 }

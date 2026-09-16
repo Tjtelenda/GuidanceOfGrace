@@ -13,7 +13,7 @@ export function mendingPathsVisible(flags = {}) {
   return Boolean(flags.eastCapitalGrace || flags.capitalGrace || flags.morgott || runes >= 2);
 }
 
-export function pathStatus(path, flags = {}, questState = () => 'unseen') {
+function basePathStatus(path, flags = {}, questState = () => 'unseen') {
   if (path.id === 'undecided') return { state:'open', text:'No ending is being prioritized.' };
   if (path.id === 'fracture') return flags.frenziedFlame && !flags.frenziedNullified
     ? { state:'blocked', text:'Temporarily blocked by the Frenzied Flame.' }
@@ -45,6 +45,12 @@ export function pathStatus(path, flags = {}, questState = () => 'unseen') {
 export function endingPriority(questId, targetId) {
   const target = ENDING_PATHS.find(path=>path.id===targetId);
   return target?.questIds.includes(questId) ? 2 : 0;
+}
+
+export function pathStatus(path,flags={},questState=()=> 'unseen'){
+  const status=basePathStatus(path,flags,questState);
+  if(status.state!=='hidden'&&!['undecided','frenzy'].includes(path.id)&&flags.frenziedFlame&&!flags.frenziedNullified)return {state:'blocked',text:'The Frenzied Flame overrides this path until removed with Miquella’s Needle in the Dragonlord’s arena.'};
+  return status;
 }
 
 export function endingWarning(targetId, flags = {}) {

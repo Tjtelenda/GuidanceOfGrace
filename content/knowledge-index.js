@@ -1,6 +1,7 @@
 import { classifyBossLocation, deriveEncounterLocations } from './completion-catalog.js';
 
-const words=value=>String(value??'').toLowerCase().normalize('NFKD');
+export const normalizeSearch=value=>String(value??'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[’']/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+const words=normalizeSearch;
 const join=(...values)=>values.flat(Infinity).filter(Boolean).join(' ');
 const record=(input)=>({...input,searchText:words(join(input.title,input.subtitle,input.region,input.location,input.tags,input.rewards,input.enemies,input.description,input.steps))});
 
@@ -19,5 +20,5 @@ export function buildKnowledgeIndex({bosses=[],quests=[],forgeSupply=[],storyBea
 export function searchKnowledge(index,query,{limit=100}={}){
   const terms=words(query).split(/\s+/).filter(Boolean);
   if(!terms.length)return index.slice(0,limit);
-  return index.map(item=>{const hay=item.searchText||words(join(item.title,item.subtitle,item.region,item.location,item.tags,item.rewards,item.enemies,item.description));return {item,score:terms.reduce((score,term)=>score+(hay.includes(term)?1:0)+(words(item.title).includes(term)?2:0),0)}}).filter(x=>x.score>=terms.length).sort((a,b)=>b.score-a.score||a.item.title.localeCompare(b.item.title)).slice(0,limit).map(x=>x.item);
+  return index.map(item=>{const hay=item.searchText||words(join(item.title,item.subtitle,item.region,item.location,item.tags,item.rewards,item.enemies,item.description));return {item,match:terms.every(term=>hay.includes(term)),score:terms.reduce((score,term)=>score+(hay.includes(term)?1:0)+(words(item.title).includes(term)?2:0),0)}}).filter(x=>x.match).sort((a,b)=>b.score-a.score||a.item.title.localeCompare(b.item.title)).slice(0,limit).map(x=>x.item);
 }

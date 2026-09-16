@@ -8,6 +8,10 @@ const on = (channel, fn) => {
 
 contextBridge.exposeInMainWorld('guidanceDesktop', {
   isDesktop: true,
+  appInfo: () => ipcRenderer.invoke('desktop:app-info'),
+  localMap: target => ipcRenderer.invoke('desktop:local-map',target),
+  generateLocal:()=>ipcRenderer.invoke('desktop:generate-local'),
+  onGeneration:fn=>on('desktop:generation',fn),
   getSettings: () => ipcRenderer.invoke('desktop:get-settings'),
   setSettings: patch => ipcRenderer.invoke('desktop:set-settings', patch),
   discoverSaves: () => ipcRenderer.invoke('desktop:discover-saves'),
@@ -28,6 +32,7 @@ contextBridge.exposeInMainWorld('guidanceDesktop', {
   exportJourney: id => ipcRenderer.invoke('desktop:export-journey', id),
   knowledgeStatus: () => ipcRenderer.invoke('desktop:knowledge-status'),
   knowledgeCatalog: () => ipcRenderer.invoke('desktop:knowledge-catalog'),
+  knowledgeEncounters: () => ipcRenderer.invoke('desktop:knowledge-encounters'),
   updateKnowledge: () => ipcRenderer.invoke('desktop:update-knowledge'),
   importKnowledge: () => ipcRenderer.invoke('desktop:import-knowledge'),
   openGameMovies: () => ipcRenderer.invoke('desktop:open-game-movies'),
@@ -36,6 +41,7 @@ contextBridge.exposeInMainWorld('guidanceDesktop', {
   installUpdate: () => ipcRenderer.invoke('desktop:install-update'),
   openExternal: url => ipcRenderer.invoke('desktop:open-external', url),
   onSave: fn => on('desktop:save', fn),
+  onSaveError: fn => on('desktop:save-error', fn),
   onGame: fn => on('desktop:game', fn),
   onUpdate: fn => on('desktop:update', fn),
   onKnowledge: fn => on('desktop:knowledge', fn),

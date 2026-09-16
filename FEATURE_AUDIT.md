@@ -1,75 +1,33 @@
-# Feature audit — V4
+# Feature audit — current V5 source
 
-This audit is scoped to the product goal: let a new Elden Ring player discover naturally while an attentive companion prevents meaningful misses, keeps the group story in order, and gives experienced friends optional second-screen context.
+| Area | Implemented | Verification |
+|---|---|---|
+| Companion safety | Read-only save/game inputs, no memory access or injection | Static tests; real saves unchanged during completed parser tests |
+| Journeys | `.grace` autosave/import/export; separate runs and profiles | Storage tests pass; installed round-trip pending |
+| Save parsing | Structural PlayerGameData walk, bounded 20/10 blessings, active slots only | Original and current real-save tests pass |
+| Imported flags | Unknown blocks remain unconfirmed; lookup table reused | Synthetic regression passes; installed retest pending |
+| Watch/lifecycle | Stable writes, debounce, stale-read cancellation, final delayed read and companion-save acknowledgement | Deterministic unit tests; live game behavior not exercised |
+| Overlay | External interactive window; configurable guidance/map hotkeys, up to two NPCs | Source/static proof; real hotkey acceptance deferred during gameplay |
+| Spoilers | Per-profile Show All, veiled future steps/endings, hidden unconfirmed boss identity | Data tests; complete installed UI proof pending |
+| NPCs | 39 grouped threads including 12 DLC threads | Internal consistency verified; manual NPC checklist remains necessary for dialogue choices |
+| Risks | 14 transitions including six DLC transitions | Data checks; flags are evidence, not exact live proximity detection |
+| Mending Paths | Target priorities, discovered-path gating, Frenzied Flame override/reversal state | Logic reviewed; not every game branch played live |
+| Ledger | 207 distinct encounter IDs / 42 DLC, derived dungeon locations, save evidence and manual overrides | Exact counts and all event addresses pass |
+| Forge Supply | Four regular and five somber miner bell bearings | Search-chain regression passes |
+| Search/data | Curated archive plus 14,481 locally generated records; normalized multiword search | Import/search tests; pickup-level coverage exceptions documented |
+| Local map | Requested-target crop from locally extracted image | Extraction complete; installed crop interaction pending |
+| Books of Knowledge | Gated story/glossary links, labeled theories, linked videos and movie-folder action | Content tests; installed UI proof pending |
+| Session planner | Time budget, NPC windows, ending priority, supply, DLC readiness and local activity estimates | Budget/priority unit test passes |
+| Knowledge updates | Trusted URL/identity, schema/checksum validation, atomic previous cache, offline fallback | Live public update and rollback/offline tests pass |
+| Application updates | electron-updater with explicit unconfigured state until a real repository exists | No GitHub credentials; no live release available |
+| Windows installation | NSIS, tray, Start Menu and desktop shortcut configuration | Installed 0.5.1; newer source still needs reinstall |
 
-## Included
+## Limits that must remain explicit
 
-- Single Player and Seamless Co-op modes.
-- Story Host / Joiner coordination in Seamless.
-- Read-only automatic `.sl2` / `.co2` save watching.
-- Per-character local profiles.
-- Parsed Rune Level, Scadutree Blessing, and Revered Spirit Ash Blessing.
-- Conservative host/joiner evidence confidence.
-- Global-hotkey interactive overlay.
-- Edge-triggered progression-risk warnings.
-- Current-area NPC suggestions with click-through to full tracker.
-- Second-monitor NPC checklist/history layout.
-- Fogged **Veiled by grace** future checkpoints.
-- Low / Balanced / Full Guide spoiler modes.
-- Save-gated NPC visibility.
-- Save-gated story beats, glossary, theory, and videos.
-- Mending Paths ending helper with selected-path prioritization/conflict warnings.
-- Optional folded **Tarnished insight** boss weakness/tip/edge guidance.
-- Quest-item ownership evidence where verified.
-- Rune-level and DLC blessing readiness guidance.
-- Time-budgeted **What should we do tonight?** planning.
-- Journey Ledger completion UI.
-- MIT full-boss catalog sync pipeline.
-- Windows game/process lifecycle and combined launcher scaffolding.
-- Final post-exit save read.
-- GitHub Releases update scaffold and manual update button.
-- Tracker export/import and optional cloud scaffold; cloud is never required.
-
-## Important implementation choices
-
-### Story Host instead of everyone advancing NPCs
-
-Seamless synchronizes NPC talk events and progression. For a story-first group, Joiner mode warns players to let the designated Story Host initiate story dialogue. This minimizes the chance that a joiner advances the shared talk state before the new player hears the earlier dialogue.
-
-### Separate overlay instead of injected overlay
-
-The overlay is an always-on-top transparent Electron window. No process-memory reads, DLL injection, graphics hooks, or anti-cheat bypasses are used.
-
-### Save checkpoints instead of fake live boss-fog telemetry
-
-The app reacts to reliable save-visible signals such as pre-boss graces, region arrivals, and world-state flags. It never claims to know an exact live action the save cannot represent.
-
-### Parsed blessing levels
-
-V4 no longer relies on manual Scadutree entry as the normal path. It locates PlayerGameData dynamically and reads Scadutree/Revered Spirit blessing values from verified save fields. Manual Scadutree input remains a fallback only.
-
-### Ending helper is advisory only
-
-Mending Paths changes companion prioritization and warnings, never the save. Most ending questlines may coexist. Frenzied Flame is modeled as the exceptional ending-state lock until reversed.
-
-## Not included by design
-
-- Save writing or automatic quest repair.
-- ReadProcessMemory / WriteProcessMemory.
-- DLL or DirectX injection.
-- EAC bypasses.
-- Admin privileges for normal operation.
-- Claims of exact NPC dialogue state from weak/generic flags.
-- Automatic opening of spoiler-heavy lore content before its save gate.
-- Redistribution of copyrighted map art from another project without permission.
-
-## Not yet release-proven
-
-- Electron runtime and overlay on an actual Windows gaming desktop.
-- NSIS installer.
-- GitHub updater against a real `guidance-of-grace` Releases feed.
-- Vendored exhaustive Journey Ledger catalog: the sync script is implemented but this container cannot reach `raw.githubusercontent.com`.
-- Full non-boss POI/dungeon/map marker extraction from the installed game.
-- Every quest permutation/event flag against live gameplay captures.
-
-Those items are mandatory Work/release acceptance, not optional future polish.
+- The encounter catalog is complete for its pinned source; it is not an exhaustive pickup catalog.
+- Local extraction resolves 3,347 pickup positions and reports unresolved source records. Dictionary entries include variants and are not unique-item counts.
+- Dialogue exhaustion, branches, lockouts and co-op propagation sometimes require manual confirmation. Save evidence must not be presented as proof of every NPC conversation.
+- The external map cannot place markers inside Elden Ring. It intentionally does not hook the game's input.
+- Remote portraits are optional and off by default; offline initials are the fallback. Game images/videos are not redistributed.
+- No signing certificate or authenticated GitHub CLI was available. This does not prevent local installation.
+- Installed end-to-end acceptance is incomplete while the user requires uninterrupted gameplay.

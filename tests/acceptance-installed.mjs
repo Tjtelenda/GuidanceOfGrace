@@ -1,0 +1,50 @@
+// Optional installed-app acceptance. Uses Playwright's Electron testing API.
+// Run with PLAYWRIGHT_MODULE pointing to playwright/index.mjs if not installed locally.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+const { _electron:electron }=await import(process.env.PLAYWRIGHT_MODULE?pathToFileURL(process.env.PLAYWRIGHT_MODULE).href:'playwright');
+const executable=process.env.GRACE_EXE??path.join(process.env.LOCALAPPDATA,'Programs','Guidance of Grace','Guidance of Grace.exe');
+const artifacts=path.resolve('acceptance-artifacts');fs.mkdirSync(artifacts,{recursive:true});
+const errors=[],proof={};let app;
+try{
+  app=await electron.launch({executablePath:executable,timeout:30000});await app.firstWindow();
+  await new Promise(r=>setTimeout(r,1800));const page=app.windows().find(p=>p.url().includes('index.html'));assert.ok(page,'main window');
+  page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.dismiss());
+  page.setDefaultTimeout(30000);console.log('STEP: main ready');
+  proof.app=await page.evaluate(()=>window.guidanceDesktop.appInfo());assert.equal(proof.app.packaged,true);
+  await page.locator('#journeyDialog').waitFor({state:'visible'});await page.screenshot({path:path.join(artifacts,'chooser.png')});
+  await page.locator('#journeyCreateSeamless').click();
+  console.log('STEP: new journey selected');
+  await page.locator('#characterDialog').waitFor({state:'visible'});await page.locator('[data-slot="0"]').click();
+  await page.waitForFunction(()=>document.querySelector('#characterName').textContent==='ScarletThot');
+  assert.match(await page.locator('#characterMeta').innerText(),/433/);
+  proof.saves=await page.evaluate(()=>window.guidanceDesktop.discoverSaves());assert.ok(proof.saves.some(s=>s.type==='co2'));assert.ok(proof.saves.some(s=>s.type==='sl2'));
+  proof.slots=(await page.evaluate(()=>window.guidanceDesktop.readSave())).map(s=>({name:s.name,level:s.level,scadu:s.scaduLevel,spirit:s.spiritBlessingLevel}));assert.deepEqual([proof.slots[0].scadu,proof.slots[0].spirit],[10,5]);
+  proof.journeyId=await page.evaluate(async()=>{const s=await window.guidanceDesktop.getSettings();const data=JSON.parse(localStorage.getItem('guidance-of-grace-v2'));await window.guidanceDesktop.saveJourney(s.activeJourneyId,data,{name:'Acceptance · disposable Seamless'});return s.activeJourneyId});
+  await page.locator('.tab[data-view="desktop"]').click();await page.locator('#desktopRole').selectOption('host');await page.waitForTimeout(250);
+  await page.locator('#globalShowAll').check();
+  await page.locator('.tab[data-view="search"]').click();await page.locator('#knowledgeSearch').fill('smithing stone 3');assert.ok(await page.locator('[data-forge-reveal="smithing-2"]').count());
+  await page.locator('[data-forge-reveal="smithing-2"]').click();assert.match(await page.locator('#mapInspector').innerText(),/Sealed Tunnel/);
+  await page.locator('.tab[data-view="search"]').click();await page.locator('#knowledgeSearch').fill('Scadutree Fragment');const local=page.locator('[data-locate-record^="local:"]').first();await local.click();await page.waitForFunction(()=>document.querySelector('#worldMap').src.startsWith('data:image'));await page.screenshot({path:path.join(artifacts,'local-map.png')});
+  await page.locator('.tab[data-view="ledger"]').click();assert.equal(await page.locator('[data-ledger]').count(),207);
+  await page.locator('.tab[data-view="story"]').click();assert.ok(await page.locator('.story-beat').count());
+  await page.locator('.tab[data-view="quests"]').click();await page.screenshot({path:path.join(artifacts,'npc-tracker.png')});
+  await page.locator('#profileSelect').selectOption('1');await page.locator('#characterDialog').waitFor({state:'visible'});await page.locator('[data-slot="1"]').click();assert.equal(await page.locator('#globalShowAll').isChecked(),false);
+  await page.locator('.tab[data-view="desktop"]').click();assert.equal(await page.locator('#desktopRole').inputValue(),'joiner');
+  await page.locator('#profileSelect').selectOption('0');await page.waitForTimeout(350);assert.equal(await page.locator('#globalShowAll').isChecked(),true);assert.equal(await page.locator('#desktopRole').inputValue(),'host');
+  const overlay=app.windows().find(p=>p.url().includes('overlay.html'));assert.ok(overlay);
+  await page.evaluate(()=>window.guidanceDesktop.toggleOverlay('guide'));await overlay.waitForTimeout(250);assert.ok(await overlay.locator('#npcs article').count()<=2);
+  proof.hotkeys=await app.evaluate(({globalShortcut})=>['CommandOrControl+Shift+G','CommandOrControl+Shift+M'].map(key=>({key,registered:globalShortcut.isRegistered(key)})));assert.ok(proof.hotkeys.every(x=>x.registered));
+  await overlay.locator('#openApp').click();await page.evaluate(()=>window.guidanceDesktop.toggleOverlay('map'));await overlay.waitForTimeout(150);assert.ok(await overlay.locator('body').evaluate(b=>b.classList.contains('map-mode')));assert.match(await overlay.locator('#mapTargetName').innerText(),/Scadutree/);await overlay.locator('#openMapTarget').click();
+  await page.locator('#globalShowAll').uncheck();
+  proof.appUpdate=await page.evaluate(()=>window.guidanceDesktop.checkUpdates());proof.knowledgeUpdate=await page.evaluate(()=>window.guidanceDesktop.updateKnowledge());
+  proof.catalog=await page.evaluate(async()=>{const rows=await window.guidanceDesktop.knowledgeCatalog();return rows.reduce((c,r)=>(c[r.type]=(c[r.type]??0)+1,c),{})});
+  await page.locator('.tab[data-view="home"]').click();await page.screenshot({path:path.join(artifacts,'installed-compass.png')});
+  await app.evaluate(({app})=>app.exit(0));app=null;
+  app=await electron.launch({executablePath:executable});await app.firstWindow();await new Promise(r=>setTimeout(r,1200));const restarted=app.windows().find(p=>p.url().includes('index.html'));
+  await restarted.locator(`[data-journey-id="${proof.journeyId}"]`).click();await restarted.waitForFunction(()=>document.querySelector('#characterName').textContent==='ScarletThot');assert.equal(await restarted.locator('#globalShowAll').isChecked(),false);
+  const settings=await restarted.evaluate(()=>window.guidanceDesktop.getSettings());assert.equal(settings.multiplayerRole,'host');assert.equal(settings.selectedSlot,0);
+  assert.deepEqual(errors,[]);proof.result='PASS';proof.errors=errors;fs.writeFileSync(path.join(artifacts,'installed-proof.json'),JSON.stringify(proof,null,2));console.log(JSON.stringify(proof,null,2));
+}catch(error){if(app){for(const p of app.windows()){if(p.url().includes('index.html')){console.log('FAIL STATE',(await p.locator('body').innerText()).slice(-6500));await p.screenshot({path:path.join(artifacts,'failure.png')}).catch(()=>{});}}}console.log('Renderer errors',errors);throw error;}finally{if(app)await app.evaluate(({app})=>app.exit(0)).catch(()=>{});}

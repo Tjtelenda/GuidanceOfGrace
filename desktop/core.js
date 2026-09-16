@@ -23,6 +23,7 @@ export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({
   playMode: 'seamless',
   multiplayerRole: 'joiner',
   activeJourneyId: '',
+  remotePortraits: false,
 });
 
 export function normalizeDesktopSettings(raw = {}) {
@@ -51,6 +52,7 @@ export function normalizeDesktopSettings(raw = {}) {
     playMode,
     multiplayerRole: role,
     activeJourneyId: typeof raw.activeJourneyId === 'string' ? raw.activeJourneyId : '',
+    remotePortraits: raw.remotePortraits === true,
   };
 }
 

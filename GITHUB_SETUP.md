@@ -1,25 +1,17 @@
 # GitHub publishing status
 
-## What is missing
+## Current status
 
-GitHub CLI is installed locally, but `gh auth status` reports no authenticated hosts. The source is committed locally on `main`. No dedicated remote has been created and no source has been pushed to Telenda-Household.
+GitHub CLI is authenticated as **Tjtelenda** using Windows credential storage. The source history is published on **main** at [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace). The repository was verified empty, changed from public to private as requested, then populated. No source was pushed while it was public.
 
-The only user-dependent step is signing in to GitHub as **Tjtelenda** and approving GitHub CLI access. Account passwords and tokens should not be pasted into chat or committed to the project.
+No further user sign-in is needed for source publishing. The three implementation commits through `65a45e3` were pushed successfully. The obsolete Telenda-Household repository was not modified.
 
-When visible interaction is allowed, the agent can initiate:
+## Publication checklist
 
-```powershell
-& .\.local-tools\gh\bin\gh.exe auth login --hostname github.com --git-protocol https --web --scopes workflow
-```
-
-The user completes GitHub's browser authorization. The `workflow` permission is requested because this project includes a Windows build workflow. GitHub CLI handles the normal repository permissions and credential storage. See the [official login documentation](https://cli.github.com/manual/gh_auth_login).
-
-## Work the agent completes after sign-in
-
-1. Verify the authenticated account and repository access without displaying credentials.
-2. Check whether `Tjtelenda/guidance-of-grace` already exists. Create it as **private** if absent; inspect existing history before using an existing repository.
-3. Configure that repository as the project remote and push the local history.
-4. Verify that saves, journeys, extracted game assets, local caches and secrets are excluded.
+1. Complete: verified the authenticated account and repository access.
+2. Complete: used the user-specified Tjtelenda/GuidanceOfGrace repository and verified private visibility.
+3. Complete: configured the HTTPS origin and pushed local history.
+4. Complete: checked tracked files; saves, journeys and local extraction/cache directories are excluded.
 5. Configure the application release feed only after the dedicated repository exists.
 6. Build and publish the tested installer, blockmap and update metadata as a versioned release.
 

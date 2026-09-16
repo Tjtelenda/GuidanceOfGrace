@@ -10,7 +10,7 @@ A Windows-first, offline Elden Ring + Shadow of the Erdtree companion. The Elect
 | Latest source | Includes fixes newer than the installed build |
 | Background tests | Six suites, including 11 failure/lifecycle simulations |
 | Installed acceptance | In progress; visible testing paused during gameplay |
-| GitHub | Local commits ready; account sign-in required |
+| GitHub | Private Tjtelenda/GuidanceOfGrace repository; main published |
 | Application updates | Feed not configured yet |
 | Knowledge updates | Independent validated encounter cache and local imports |
 
@@ -48,6 +48,6 @@ npm run dist:win -- --publish never
 
 The NSIS installer creates Start Menu and desktop shortcuts. Builds are unsigned unless a signing certificate is supplied; Windows SmartScreen can identify an unsigned installer as unrecognized. No certificate is required to produce a working installer.
 
-App updates use electron-updater when a real release feed is configured. The dedicated private GitHub repository has not been created because `gh auth status` reported no authenticated account. The app reports this explicitly; knowledge updates still work. Never configure the app feed to the obsolete Household handoff.
+App updates use electron-updater when a real release feed is configured. The dedicated private repository is https://github.com/Tjtelenda/GuidanceOfGrace and the source is published on main. Private release-download authentication and the first tested release are still pending. The app reports this explicitly; knowledge updates still work. Never configure the app feed to the obsolete Household handoff.
 
 See [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md) for current installed-test status and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for licenses. The original canonical source is preserved in the first Git commit and its original `SOURCE_MANIFEST.txt`.

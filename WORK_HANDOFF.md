@@ -8,7 +8,7 @@ The user is actively playing Elden Ring and explicitly selected **Keep working i
 
 ## Remaining work before declaring completion
 
-1. Continue final source review. Implementation is committed locally; background tests now include 11 failure/lifecycle simulations. GitHub CLI is unauthenticated; see GITHUB_SETUP.md for the sign-in and private-feed requirements.
+1. Continue final source review. Implementation is committed locally; background tests now include 11 failure/lifecycle simulations. GitHub CLI is authenticated as Tjtelenda and main is published to the private Tjtelenda/GuidanceOfGrace repository. See GITHUB_SETUP.md for remaining private-feed requirements.
 2. Once the user allows visible testing, build the latest source (it is ahead of installed 0.5.1), install it, and run `tests/acceptance-installed.mjs` against the installed path.
 3. Verify character choice now works with imported marker flags. The initial installed test timed out; lookup-table caching and unsupported-flag handling were added afterward.
 4. Complete solo/Seamless isolation, host/joiner/profile switching, Show All, both global hotkeys, clickable NPC/Where/map flow, local map crop, search, Ledger, Books, persistence and update checks.

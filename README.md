@@ -2,6 +2,20 @@
 
 A Windows-first, offline Elden Ring + Shadow of the Erdtree companion. The Electron app reads `.sl2` and Seamless `.co2` saves and keeps its own progress in separate `.grace` journeys.
 
+## Current delivery status
+
+| Item | Status |
+| --- | --- |
+| Installed application | Version 0.5.1, Start Menu shortcut present |
+| Latest source | Includes fixes newer than the installed build |
+| Background tests | Six suites, including 11 failure/lifecycle simulations |
+| Installed acceptance | In progress; visible testing paused during gameplay |
+| GitHub | Local commits ready; account sign-in required |
+| Application updates | Feed not configured yet |
+| Knowledge updates | Independent validated encounter cache and local imports |
+
+See [BACKGROUND_TESTING.md](BACKGROUND_TESTING.md) for simulation coverage and [GITHUB_SETUP.md](GITHUB_SETUP.md) for the exact remaining GitHub steps.
+
 ## Features
 
 - Journey chooser, isolated Single Player/Seamless runs, three local profiles per journey, Story Host/Joiner roles, safe autosave and journey import/export.

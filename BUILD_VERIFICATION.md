@@ -12,7 +12,7 @@
 
 - Windows 11; production build tooling Node 24.19.0; Electron 44.3.0; electron-builder 26.16.1.
 - Original four test modules passed before implementation (Windows test-runner URL conversion fixed; assertions unchanged).
-- `npm test`: all five suites pass, including the added V5 suite.
+- `npm test`: all six suites pass, including V5 regressions and 11 background-only failure/lifecycle simulations. See BACKGROUND_TESTING.md for scenario coverage.
 - `node --check app.js` and `node --check desktop/main.js`: pass.
 - `node tests/test-save-parser.mjs ..\elden-ring-work\backup-20260915-011419\76561198409539987\ER0000.co2`: original historical real-save assertions pass.
 - `node tests/test-local-save.mjs C:\Users\trent\AppData\Roaming\EldenRing\76561198409539987\ER0000.co2`: both parsers agree, all 207 encounter event addresses resolve, hash unchanged.

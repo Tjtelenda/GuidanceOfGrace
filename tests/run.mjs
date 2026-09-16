@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root=new URL('..',import.meta.url), savePath=process.argv[2];
-const tests=[...(savePath?[['test-save-parser.mjs',savePath]]:[]),['test-data.mjs'],['test-content.mjs'],['test-desktop-core.mjs'],['test-static.mjs'],['test-v5.mjs']];
+const tests=[...(savePath?[['test-save-parser.mjs',savePath]]:[]),['test-data.mjs'],['test-content.mjs'],['test-desktop-core.mjs'],['test-static.mjs'],['test-v5.mjs'],['test-simulations.mjs']];
 for(const [file,arg] of tests){
   const args=[fileURLToPath(new URL(`./tests/${file}`,root))];
   if(arg)args.push(arg);

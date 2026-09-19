@@ -1,33 +1,24 @@
-# GitHub publishing status
+# GitHub publication
 
-## Current status
+## Repository
 
-GitHub CLI is authenticated as **Tjtelenda** using Windows credential storage. The source history is published on **main** at [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace). The repository was verified empty, changed from public to private as requested, then populated. No source was pushed while it was public.
+The authorized public repository is [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace), on main. GitHub CLI authentication is available; no additional sign-in is currently required. The obsolete Household handoff is not used or modified.
 
-No further user sign-in is needed for source publishing. The three implementation commits through `65a45e3` were pushed successfully. The obsolete Telenda-Household repository was not modified.
+Version 0.6.0 publication is pending installed-build verification. The app update provider points to this public repository. Public release downloads do not need a token embedded in the app.
 
-## Publication checklist
+## Release checklist
 
-1. Complete: verified the authenticated account and repository access.
-2. Complete: used the user-specified Tjtelenda/GuidanceOfGrace repository and verified private visibility.
-3. Complete: configured the HTTPS origin and pushed local history.
-4. Complete: checked tracked files; saves, journeys and local extraction/cache directories are excluded.
-5. Configure the application release feed only after the dedicated repository exists.
-6. Build and publish the tested installer, blockmap and update metadata as a versioned release.
+1. Run complete tests and installed acceptance against the final build.
+2. Inspect packaged contents: exclude saves, journeys, secrets, caches and extracted game assets.
+3. Commit the final source and verification report, then push main.
+4. Publish the tested NSIS installer, blockmap and update metadata under the matching version tag.
+5. Verify release assets, installer SHA-256 and the installed app's update response.
 
-The existing workflow currently builds and retains an installer artifact. It deliberately does not publish releases before the repository and feed are configured. A successful workflow artifact alone does not provide an automatic update feed.
+A build artifact alone is not a published release. A configured provider alone is not end-to-end update verification. Record evidence in [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md).
 
-## Private application updates require separate access
+## Signing and data
 
-Signing in to GitHub CLI enables source publication; it does not automatically authenticate electron-updater. A private release feed needs authenticated access when the installed application checks or downloads updates. Electron-builder documents its private GitHub provider and `GH_TOKEN` support in the [version 26 update documentation](https://www.electron.build/v26/docs/features/auto-update/).
-
-Before enabling that feed, implement or configure a local main-process credential path with read-only access to this repository's releases. Never embed a token in the installer, renderer, repository, journey export or update metadata. Publishing credentials need write access; the installed application does not.
-
-The source and releases remain private unless the user explicitly approves a different distribution arrangement. No public mirror is authorized by this project request.
-
-## Signing and knowledge updates
-
-- A Windows code-signing certificate is optional for building and installing. Without one, the installer is unsigned and may receive a Windows SmartScreen prompt.
-- Signing in to GitHub does not sign the Windows executable.
-- Knowledge updates use their separately validated public source and local cache. They do not require access to the private application repository.
-- The application currently reports its app-update feed as unconfigured. This is a pending setup item, not proof that app updating works end to end.
+- Builds remain unsigned unless a Windows signing certificate is supplied. GitHub authentication does not sign executables; SmartScreen can flag an unsigned installer.
+- Never embed tokens in the repository, renderer, installer or journey exports.
+- Knowledge updates use their own validated source and cache independently of app releases.
+- Locally generated game data and assets are not release assets.

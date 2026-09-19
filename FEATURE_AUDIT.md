@@ -1,33 +1,29 @@
-# Feature audit — current V5 source
+# Feature audit — 0.6.0
 
-| Area | Implemented | Verification |
-|---|---|---|
-| Companion safety | Read-only save/game inputs, no memory access or injection | Static tests; real saves unchanged during completed parser tests |
-| Journeys | `.grace` autosave/import/export; separate runs and profiles | Storage tests pass; installed round-trip pending |
-| Save parsing | Structural PlayerGameData walk, bounded 20/10 blessings, active slots only | Original and current real-save tests pass |
-| Imported flags | Unknown blocks remain unconfirmed; lookup table reused | Synthetic regression passes; installed retest pending |
-| Watch/lifecycle | Stable writes, debounce, stale-read cancellation, final delayed read and companion-save acknowledgement | Deterministic unit tests; live game behavior not exercised |
-| Overlay | External interactive window; configurable guidance/map hotkeys, up to two NPCs | Source/static proof; real hotkey acceptance deferred during gameplay |
-| Spoilers | Per-profile Show All, veiled future steps/endings, hidden unconfirmed boss identity | Data tests; complete installed UI proof pending |
-| NPCs | 39 grouped threads including 12 DLC threads | Internal consistency verified; manual NPC checklist remains necessary for dialogue choices |
-| Risks | 14 transitions including six DLC transitions | Data checks; flags are evidence, not exact live proximity detection |
-| Mending Paths | Target priorities, discovered-path gating, Frenzied Flame override/reversal state | Logic reviewed; not every game branch played live |
-| Ledger | 207 distinct encounter IDs / 42 DLC, derived dungeon locations, save evidence and manual overrides | Exact counts and all event addresses pass |
-| Forge Supply | Four regular and five somber miner bell bearings | Search-chain regression passes |
-| Search/data | Curated archive plus 14,481 locally generated records; normalized multiword search | Import/search tests; pickup-level coverage exceptions documented |
-| Local map | Requested-target crop from locally extracted image | Extraction complete; installed crop interaction pending |
-| Books of Knowledge | Gated story/glossary links, labeled theories, linked videos and movie-folder action | Content tests; installed UI proof pending |
-| Session planner | Time budget, NPC windows, ending priority, supply, DLC readiness and local activity estimates | Budget/priority unit test passes |
-| Knowledge updates | Trusted URL/identity, schema/checksum validation, atomic previous cache, offline fallback | Live public update and rollback/offline tests pass |
-| Application updates | electron-updater with explicit unconfigured state until a real repository exists | No GitHub credentials; no live release available |
-| Windows installation | NSIS, tray, Start Menu and desktop shortcut configuration | Installed 0.5.1; newer source still needs reinstall |
+Installed acceptance and publication are in progress. Final evidence belongs in [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md).
 
-## Limits that must remain explicit
+| Area | Current behavior | Verification or limitation |
+| --- | --- | --- |
+| Safety | Read-only game/save inputs; overlay and global hotkeys removed | Final package and installed checks required |
+| Player model | One local player per journey; solo/Seamless isolation; legacy profile recovery | Remote players are not tracked |
+| Save parsing | Structural PlayerGameData locator and bounded blessings | Prior real-save checks passed; malformed-input regressions retained |
+| Monitoring | Stable writes, shared reads, unchanged suppression, stale-read cancellation | Deterministic lifecycle tests; live gameplay remains separate verification |
+| Performance | Active-view rendering, cached/debounced search, conditional 10-second polling | Installed responsiveness checked during acceptance |
+| Navigation | Current guidance first; secondary tools under More | Designed for a second screen with less explanatory clutter |
+| Spoilers | Journey-local Show All; hidden future steps and unconfirmed boss identities | Explicit searches and Full Guide can reveal more |
+| NPCs and risks | 39 grouped threads including 12 DLC threads | Dialogue and propagated co-op state may need manual confirmation |
+| Mending Paths | Discovered paths, priorities and Frenzied Flame override/reversal | Not every branch has been played live |
+| Ledger | 207 unique encounters / 42 DLC | Complete for pinned encounter source, not exhaustive item data |
+| Forge Supply | Four regular and five somber miner bell bearings | Search-chain regression coverage |
+| Search and map | Curated archive plus 14,481 local records and map crops | 3,347 pickup positions; variants and unresolved records documented |
+| Books and video | Gated story/glossary, labeled interpretations, inline local MP4/WebM | Synthetic playback tested in 0.5.4; .bk2 unsupported |
+| Session planning | Time budget, NPC windows, ending priorities and readiness | Estimates are advisory |
+| Knowledge updates | Trusted identity, schema/checksum checks, atomic cache, offline fallback | Rollback and failure simulations |
+| App updates | Public GitHub release provider configured | 0.6.0 publication and final feed check pending |
+| Windows delivery | NSIS, Start Menu and desktop shortcuts | Installed 0.6.0 acceptance in progress |
 
-- The encounter catalog is complete for its pinned source; it is not an exhaustive pickup catalog.
-- Local extraction resolves 3,347 pickup positions and reports unresolved source records. Dictionary entries include variants and are not unique-item counts.
-- Dialogue exhaustion, branches, lockouts and co-op propagation sometimes require manual confirmation. Save evidence must not be presented as proof of every NPC conversation.
-- The external map cannot place markers inside Elden Ring. It intentionally does not hook the game's input.
-- Remote portraits are optional and off by default; offline initials are the fallback. Game images/videos are not redistributed.
-- No signing certificate or authenticated GitHub CLI was available. This does not prevent local installation.
-- Installed end-to-end acceptance is incomplete while the user requires uninterrupted gameplay.
+## Data boundaries
+
+See [LOCAL_KNOWLEDGE.md](LOCAL_KNOWLEDGE.md) for provenance and extraction exceptions. Dictionary variants are not unique-item counts. Save flags do not prove every conversation or exact player proximity.
+
+Game images/videos are not redistributed. Optional remote portraits default off. No Windows signing certificate is configured; this does not prevent installation.

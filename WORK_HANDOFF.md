@@ -1,18 +1,27 @@
-# Guidance of Grace — current work state
+# Work handoff — 0.6.0
 
-The canonical complete V5 source is available and verified. Ignore the obsolete V4 chunked GitHub handoff. Original archive/source history is retained in the initial Git commit.
+## Current scope
 
-## Current restriction
+Continue canonical V5; ignore the obsolete V4 chunked handoff. Latest direction: a calm second-screen companion for one local player, no overlay, reduced resource use and useful guidance instead of feature-explanation tiles.
 
-The user is actively playing Elden Ring and explicitly selected **Keep working in the background only**. Do not launch visible apps, trigger overlay hotkeys, take focus, run live-game tests, extract game archives, or run heavy builds while this restriction remains. No Guidance of Grace process was running at the last check. Do not change unrelated settings or stop the game.
+Visible building, installation and acceptance are authorized as of September 19. The earlier background-only restriction no longer applies. The user requested a bounded usage budget and PC shutdown after the night's release work.
 
-## Remaining work before declaring completion
+## Implemented direction
 
-1. Continue final source review. Implementation is committed locally; background tests now include 11 failure/lifecycle simulations. GitHub CLI is authenticated as Tjtelenda and main is published to the private Tjtelenda/GuidanceOfGrace repository. See GITHUB_SETUP.md for remaining private-feed requirements.
-2. Once the user allows visible testing, build the latest source (it is ahead of installed 0.5.1), install it, and run `tests/acceptance-installed.mjs` against the installed path.
-3. Verify character choice now works with imported marker flags. The initial installed test timed out; lookup-table caching and unsupported-flag handling were added afterward.
-4. Complete solo/Seamless isolation, host/joiner/profile switching, Show All, both global hotkeys, clickable NPC/Where/map flow, local map crop, search, Ledger, Books, persistence and update checks.
-5. Run the configured local-generation action when gameplay is finished. Existing generated cache is installed; in-app regeneration still needs acceptance proof.
-6. Inspect packaged contents for forbidden saves/journeys/assets; hash final installer; verify installed version, shortcuts, clean Git state; leave the app installed and usable.
+- One local player per journey; legacy extra profiles retained only for recovery.
+- No overlay or global overlay/map hotkeys.
+- Shared save reads, unchanged suppression and conditional 10-second process polling.
+- Active-view rendering, cached/debounced search and secondary navigation under More.
+- Inline local MP4/WebM playback; proprietary .bk2 movies unsupported.
+- Public target: [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace), main. Authentication available.
 
-See BUILD_VERIFICATION.md for completed proof and LOCAL_KNOWLEDGE.md for data counts/limitations. Do not claim the full installed acceptance suite passed yet.
+## Remaining release work
+
+1. Finish installed 0.6.0 acceptance and fix blockers.
+2. Verify binding, NPC-to-map flow, search, Ledger, Books, Show All, persistence and update checks.
+3. Confirm only the companion window exists and no global hotkeys are registered.
+4. Run final tests, inspect packaged contents and record version, shortcuts, installer hash and results in BUILD_VERIFICATION.md.
+5. Commit and publish verified source, installer, blockmap and update metadata. Confirm release availability.
+6. Leave the app installed, provide the concise result report, then honor requested shutdown without forcing unrelated applications to discard unsaved work.
+
+Do not claim acceptance or publication before verification. Data remains 207 bundled encounters / 42 DLC plus 14,481 local records with coverage limits. See LOCAL_KNOWLEDGE.md; do not claim exhaustive pickups or redistribute extracted assets.

@@ -1,53 +1,51 @@
 # Guidance of Grace
 
-A Windows-first, offline Elden Ring + Shadow of the Erdtree companion. The Electron app reads `.sl2` and Seamless `.co2` saves and keeps its own progress in separate `.grace` journeys.
+A Windows-first, offline Elden Ring + Shadow of the Erdtree companion for a second screen. Reads local .sl2 or Seamless .co2 saves and keeps companion progress in .grace journeys.
 
-## Current delivery status
+## Version 0.6.0
 
-| Item | Status |
+One local player, current guidance and lower background overhead. The overlay and global hotkeys are removed. Primary navigation is quieter; secondary tools sit under **More**.
+
+| Delivery | Status |
 | --- | --- |
-| Installed application | Version 0.5.1, Start Menu shortcut present |
-| Latest source | Includes fixes newer than the installed build |
-| Background tests | Six suites, including 11 failure/lifecycle simulations |
-| Installed acceptance | In progress; visible testing paused during gameplay |
-| GitHub | Private Tjtelenda/GuidanceOfGrace repository; main published |
-| Application updates | Feed not configured yet |
-| Knowledge updates | Independent validated encounter cache and local imports |
+| Source | 0.6.0 second-screen application |
+| Installed acceptance | In progress |
+| Public repository | [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace) |
+| 0.6.0 publication | Pending verification |
+| App update provider | Dedicated public repository configured |
+| Knowledge updates | Separate validated cache with offline fallback |
 
-See [BACKGROUND_TESTING.md](BACKGROUND_TESTING.md) for simulation coverage and [GITHUB_SETUP.md](GITHUB_SETUP.md) for the exact remaining GitHub steps.
+See [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md) for current proof.
 
 ## Features
 
-- Journey chooser, isolated Single Player/Seamless runs, three local profiles per journey, Story Host/Joiner roles, safe autosave and journey import/export.
-- Spoiler-aware NPC checklists, current locations, progression warnings, Mending Paths, Books of Knowledge and timed session suggestions.
-- Per-profile Show All, hidden future checkpoints, and optional Whisper of Grace encounter guidance.
-- External interactive overlay: Ctrl+Shift+G; pinned map target: Ctrl+Shift+M. Both shortcuts are configurable.
-- Read-only stable-save monitoring, optional tray/startup/game lifecycle integration, and launcher discovery.
-- 207 bundled encounter records, including 42 DLC encounters; event-driven completion with manual overrides.
-- Forge Supply covers all four regular and five somber miner bell bearings.
-- Local searchable item/marker imports and independently versioned knowledge updates with validation and rollback.
+- One local character per journey; solo and Seamless runs stay independent. Legacy extra profiles are retained for recovery, not tracked as remote players.
+- Relevant NPC threads, locations, progression warnings, Mending Paths and time-budgeted session suggestions.
+- Future content hidden by default; deliberate Show All and optional Whisper of Grace details.
+- 207 bundled encounters, including 42 DLC encounters, with save evidence and manual confirmations.
+- Four regular and five somber miner bell-bearing supply chains.
+- Curated archive and local catalog search; map targets stay inside the companion.
+- Inline local MP4/WebM playback. Elden Ring .bk2 movies are not supported for inline playback.
 
-The locally generated data on this PC adds 14,481 records and map crops. See [LOCAL_KNOWLEDGE.md](LOCAL_KNOWLEDGE.md) for exact categories, provenance, regeneration and coverage limitations. Extracted copyrighted game assets are not shipped in the installer or Git repository.
+Current local generation contains 14,481 records, including dictionary variants and 3,347 pickup positions. This is not exhaustive item coverage. See [LOCAL_KNOWLEDGE.md](LOCAL_KNOWLEDGE.md) for provenance and gaps. Extracted assets are not redistributed.
 
-## Safety boundary
+## Performance and safety
 
-No save writes, memory access, game executable patches, anti-cheat bypass, DLL injection or Seamless modification. The overlay is a normal external window. Game/save inputs are read-only. Companion settings, journeys and knowledge live under `%APPDATA%\Guidance of Grace`.
+Save reads share in-flight work and suppress unchanged snapshots. Only the active screen is rendered. Search caches normalized records and debounces typing. Optional game-lifecycle detection uses conditional 10-second polling.
 
-## Development and verification
+Game files and saves are read-only. No overlay, input hooks, memory access, injection, executable patching, anti-cheat bypass or Seamless modification.
 
-Use Node 24 (Electron 44 tooling requires Node >=22.12), then `npm ci` and `node node_modules/electron/install.js` if the Electron binary is absent. Commands:
+## Development
+
+Use Node 24 and run `npm ci`. If necessary, install the Electron binary with `node node_modules/electron/install.js`.
 
 ```text
 npm test
-node tests/test-save-parser.mjs <original-read-only-fixture.co2>
+node tests/test-save-parser.mjs <read-only-fixture.co2>
 node tests/test-local-save.mjs <read-only-current-save.co2>
 npm run dist:win -- --publish never
 ```
 
-`tests/acceptance-installed.mjs` tests the installed executable using Playwright's Electron API. Set `PLAYWRIGHT_MODULE` to an existing Playwright `index.mjs`, or install Playwright as a developer tool. It creates disposable companion journeys and never changes game saves. It opens windows and must not run while the user has requested uninterrupted gameplay.
+Installed acceptance uses Playwright's Electron API and disposable companion data. It opens windows and must target the installed executable. NSIS creates Start Menu and desktop shortcuts. Unsigned builds may receive a SmartScreen prompt.
 
-The NSIS installer creates Start Menu and desktop shortcuts. Builds are unsigned unless a signing certificate is supplied; Windows SmartScreen can identify an unsigned installer as unrecognized. No certificate is required to produce a working installer.
-
-App updates use electron-updater when a real release feed is configured. The dedicated private repository is https://github.com/Tjtelenda/GuidanceOfGrace and the source is published on main. Private release-download authentication and the first tested release are still pending. The app reports this explicitly; knowledge updates still work. Never configure the app feed to the obsolete Household handoff.
-
-See [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md) for current installed-test status and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for licenses. The original canonical source is preserved in the first Git commit and its original `SOURCE_MANIFEST.txt`.
+See [GITHUB_SETUP.md](GITHUB_SETUP.md), [FEATURE_AUDIT.md](FEATURE_AUDIT.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The canonical source and manifest are preserved in the initial Git commit.

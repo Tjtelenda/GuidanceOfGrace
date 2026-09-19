@@ -53,3 +53,11 @@ Local source: egormagurin/EldenRingMap `48f42e570ada1dd28717d7ce56aaeb92ee14521b
 ## Original source
 
 Canonical archive SHA-256: `2cfcd0caabb1911dc4866d634e06121066ff563b62f88c6e66ca55d7a2f73e6c`. All 51 SOURCE_MANIFEST entries verified before editing. Original source retained in commit `3af9e82`. Obsolete V4 handoff was not used. Original tests passed before implementation.
+
+## Published-release confirmation
+
+- Public release `v0.6.0` targets source/documentation commit `4096375` (application implementation `e28d3e2`).
+- `node tests/acceptance-release.mjs`: PASS against installed 0.6.0; live GitHub feed emitted `current`, version `0.6.0`.
+- GitHub reports the uploaded installer SHA-256 exactly matching the local hash above. Installer, blockmap, latest.yml and SHA256SUMS.txt are uploaded.
+- The final installed acceptance rerun passed after correcting the test to wait for startup event subscriptions before sending its simulated missing-slot event. No assertions were weakened.
+- Test journeys explicitly named `Acceptance · disposable…` were archived in ignored local acceptance artifacts. Existing other journeys were preserved; launch opens the chooser.

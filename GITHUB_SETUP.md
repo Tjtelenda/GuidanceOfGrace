@@ -4,7 +4,7 @@
 
 The authorized public repository is [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace), on main. GitHub CLI authentication is available; no additional sign-in is currently required. The obsolete Household handoff is not used or modified.
 
-Version 0.6.0 publication is pending installed-build verification. The app update provider points to this public repository. Public release downloads do not need a token embedded in the app.
+Version 0.6.0 is published with the tested installer, blockmap, update metadata and SHA-256. Installed live-feed verification passed. The app update provider points to this public repository. Public release downloads do not need a token embedded in the app.
 
 ## Release checklist
 

@@ -9,9 +9,9 @@ One local player, current guidance and lower background overhead. The overlay an
 | Delivery | Status |
 | --- | --- |
 | Source | 0.6.0 second-screen application |
-| Installed acceptance | In progress |
+| Installed acceptance | PASS on Windows 11 |
 | Public repository | [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace) |
-| 0.6.0 publication | Pending verification |
+| 0.6.0 publication | [Published installer](https://github.com/Tjtelenda/GuidanceOfGrace/releases/tag/v0.6.0) |
 | App update provider | Dedicated public repository configured |
 | Knowledge updates | Separate validated cache with offline fallback |
 

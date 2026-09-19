@@ -15,13 +15,8 @@ Visible building, installation and acceptance are authorized as of September 19.
 - Inline local MP4/WebM playback; proprietary .bk2 movies unsupported.
 - Public target: [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace), main. Authentication available.
 
-## Remaining release work
+## Release completed
 
-1. Finish installed 0.6.0 acceptance and fix blockers.
-2. Verify binding, NPC-to-map flow, search, Ledger, Books, Show All, persistence and update checks.
-3. Confirm only the companion window exists and no global hotkeys are registered.
-4. Run final tests, inspect packaged contents and record version, shortcuts, installer hash and results in BUILD_VERIFICATION.md.
-5. Commit and publish verified source, installer, blockmap and update metadata. Confirm release availability.
-6. Leave the app installed, provide the concise result report, then honor requested shutdown without forcing unrelated applications to discard unsaved work.
+0.6.0 is installed, acceptance-tested and published at https://github.com/Tjtelenda/GuidanceOfGrace/releases/tag/v0.6.0. The installed updater reports this release as current. See BUILD_VERIFICATION.md for exact proof, paths and hash. Disposable named acceptance journeys were archived outside application data; existing other journeys were retained.
 
-Do not claim acceptance or publication before verification. Data remains 207 bundled encounters / 42 DLC plus 14,481 local records with coverage limits. See LOCAL_KNOWLEDGE.md; do not claim exhaustive pickups or redistribute extracted assets.
+Keep future work scoped to the second-screen companion. Remaining limitations: direct Bink 2 playback, unresolved local item lots, broader quest-by-quest factual review and manual long-session/game-exit testing. There is no live remote-player tracking. Do not reintroduce the overlay or global hotkeys.

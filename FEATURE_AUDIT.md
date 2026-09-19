@@ -1,10 +1,10 @@
 # Feature audit — 0.6.0
 
-Installed acceptance and publication are in progress. Final evidence belongs in [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md).
+Installed 0.6.0 acceptance and publication passed. Final evidence belongs in [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md).
 
 | Area | Current behavior | Verification or limitation |
 | --- | --- | --- |
-| Safety | Read-only game/save inputs; overlay and global hotkeys removed | Final package and installed checks required |
+| Safety | Read-only game/save inputs; overlay and global hotkeys removed | Package audit and installed checks passed |
 | Player model | One local player per journey; solo/Seamless isolation; legacy profile recovery | Remote players are not tracked |
 | Save parsing | Structural PlayerGameData locator and bounded blessings | Prior real-save checks passed; malformed-input regressions retained |
 | Monitoring | Stable writes, shared reads, unchanged suppression, stale-read cancellation | Deterministic lifecycle tests; live gameplay remains separate verification |
@@ -16,11 +16,11 @@ Installed acceptance and publication are in progress. Final evidence belongs in 
 | Ledger | 207 unique encounters / 42 DLC | Complete for pinned encounter source, not exhaustive item data |
 | Forge Supply | Four regular and five somber miner bell bearings | Search-chain regression coverage |
 | Search and map | Curated archive plus 14,481 local records and map crops | 3,347 pickup positions; variants and unresolved records documented |
-| Books and video | Gated story/glossary, labeled interpretations, inline local MP4/WebM | Synthetic playback tested in 0.5.4; .bk2 unsupported |
+| Books and video | Gated story/glossary, labeled interpretations, inline local MP4/WebM | Synthetic playback tested in installed 0.6.0; .bk2 unsupported |
 | Session planning | Time budget, NPC windows, ending priorities and readiness | Estimates are advisory |
 | Knowledge updates | Trusted identity, schema/checksum checks, atomic cache, offline fallback | Rollback and failure simulations |
-| App updates | Public GitHub release provider configured | 0.6.0 publication and final feed check pending |
-| Windows delivery | NSIS, Start Menu and desktop shortcuts | Installed 0.6.0 acceptance in progress |
+| App updates | Public GitHub release provider configured | Published 0.6.0; installed live-feed check passed |
+| Windows delivery | NSIS, Start Menu and desktop shortcuts | Installed 0.6.0 acceptance passed |
 
 ## Data boundaries
 

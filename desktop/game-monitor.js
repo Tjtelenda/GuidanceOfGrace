@@ -13,21 +13,30 @@ export async function listWindowsProcesses() {
 }
 
 export class GameMonitor {
-  constructor(onChange, intervalMs = 2000, listProcesses = listWindowsProcesses) {
+  constructor(onChange, intervalMs = 10000, listProcesses = listWindowsProcesses) {
     this.onChange = onChange;
     this.intervalMs = intervalMs;
     this.running = false;
     this.timer = null;
     this.listProcesses=listProcesses;
+    this.generation=0;
+    this.pending=null;
   }
 
-  async poll() {
-    const processes = await this.listProcesses();
-    const nowRunning = processes.some(isGameProcess);
-    if (nowRunning !== this.running) {
-      this.running = nowRunning;
-      this.onChange?.(nowRunning, processes);
-    }
+  poll() {
+    if (this.pending) return this.pending;
+    const generation=this.generation;
+    const pending=(async()=>{
+      const processes = await this.listProcesses();
+      if(generation!==this.generation)return;
+      const nowRunning = processes.some(isGameProcess);
+      if (nowRunning !== this.running) {
+        this.running = nowRunning;
+        this.onChange?.(nowRunning, processes);
+      }
+    })().finally(()=>{if(this.pending===pending)this.pending=null;});
+    this.pending=pending;
+    return pending;
   }
 
   start() {
@@ -39,5 +48,8 @@ export class GameMonitor {
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.generation++;
+    this.pending=null;
+    this.running=false;
   }
 }

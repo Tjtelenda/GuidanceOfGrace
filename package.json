@@ -1,8 +1,8 @@
 {
   "name": "guidance-of-grace",
   "productName": "Guidance of Grace",
-  "version": "0.5.1",
-  "description": "Offline spoiler-light Elden Ring and Seamless Co-op companion with read-only save tracking and an optional in-game overlay.",
+  "version": "0.6.0",
+  "description": "Offline second-screen Elden Ring companion with read-only local save tracking.",
   "private": true,
   "type": "module",
   "main": "desktop/main.js",
@@ -27,8 +27,6 @@
     "asar": true,
     "files": [
       "app.js",
-      "cloud.js",
-      "cloud-config.js",
       "data.js",
       "index.html",
       "manifest.webmanifest",
@@ -40,7 +38,8 @@
       "README.md",
       "LOCAL_KNOWLEDGE.md",
       "THIRD_PARTY_NOTICES.md",
-      "package.json"
+      "package.json",
+      "desktop-layout.css"
     ],
     "win": {
       "target": [
@@ -53,7 +52,14 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Tjtelenda",
+        "repo": "GuidanceOfGrace"
+      }
+    ]
   },
   "author": "Guidance of Grace contributors"
 }

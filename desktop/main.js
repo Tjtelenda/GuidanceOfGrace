@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { app, BrowserWindow, globalShortcut, ipcMain, dialog, shell, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } from 'electron';
 import updater from 'electron-updater';
 import { SettingsStore } from './settings-store.js';
 import { JourneyStore } from './journey-store.js';
@@ -11,8 +11,10 @@ import { SaveMonitor, discoverSaveFiles, parseSaveFile } from './save-monitor.js
 import { GameMonitor } from './game-monitor.js';
 import { GameLifecycle } from './game-lifecycle.js';
 import { regenerateLocal } from './local-generator.js';
+import { localPlayerState } from '../content/journey-state.js';
+import { listLocalMovies, playableMovie } from './local-media.js';
 import { discoverGameInstall } from './game-paths.js';
-import { diffSnapshot, shouldNotify } from './core.js';
+import { diffSnapshot, resolveSavePath } from './core.js';
 
 const { autoUpdater } = updater;
 
@@ -22,22 +24,18 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 
 let mainWindow = null;
-let overlayWindow = null;
 let store = null;
 let journeyStore = null;
 let knowledgeUpdater = null;
 let lastSlots = [];
-let overlayPayload = { title: 'Guidance of Grace', message: 'No save connected yet.', warnings: [], npcs: [] };
 let isQuitting = false;
 let gameWasRunning = false;
-let lastAutoNoticeSignature = '';
-let overlayMode = 'guide';
 let tray=null;
 let localGeneration=null;
 let finalSaveAcknowledged=null;
 
 const send = (channel, payload) => {
-  for (const win of [mainWindow, overlayWindow]) if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+  for (const win of [mainWindow]) if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 };
 
 function secureWindow(win) {
@@ -66,51 +64,13 @@ function createMainWindow() {
   });
 }
 
-function createOverlayWindow() {
-  overlayWindow = new BrowserWindow({
-    width: 470, height: 620, minWidth: 380, minHeight: 280,
-    frame: false, transparent: true, resizable: true, alwaysOnTop: true,
-    skipTaskbar: true, show: false, hasShadow: true,
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
-  });
-  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
-  secureWindow(overlayWindow);
-  void overlayWindow.loadFile(path.join(__dirname, 'overlay.html'));
-  overlayWindow.on('blur', () => { if (overlayWindow?.isVisible() && !overlayWindow.webContents.isDevToolsOpened()) overlayWindow.hide(); });
-}
-
-function toggleOverlay(force, mode='guide') {
-  overlayMode = mode === 'map' ? 'map' : 'guide';
-  if (!overlayWindow || overlayWindow.isDestroyed()) return false;
-  const show = force ?? !overlayWindow.isVisible();
-  if (show) {
-    overlayWindow.webContents.send('desktop:overlay-payload', { ...overlayPayload, overlayMode });
-    overlayWindow.showInactive();
-    overlayWindow.focus();
-  } else overlayWindow.hide();
-  return show;
-}
-
-function registerHotkeys(settings = store.get()) {
-  globalShortcut.unregisterAll();
-  if (!settings.overlayEnabled) return true;
-  try {
-    const guideOk = globalShortcut.register(settings.overlayHotkey, () => toggleOverlay(undefined, 'guide'));
-    const mapOk = globalShortcut.register(settings.mapOverlayHotkey, () => toggleOverlay(undefined, 'map'));
-    return guideOk && mapOk;
-  } catch {return false;}
-}
-
 function configureLoginItem() {
   if (process.platform !== 'win32') return;
   app.setLoginItemSettings({ openAtLogin: store.get().startWithWindows, args: ['--background'] });
 }
 
 function savePathOrAuto() {
-  const settings = store.get(), preferred = settings.playMode === 'single' ? 'sl2' : 'co2';
-  if (settings.selectedSavePath && fs.existsSync(settings.selectedSavePath) && path.extname(settings.selectedSavePath).slice(1).toLowerCase() === preferred) return settings.selectedSavePath;
-  const saves = discoverSaveFiles();
-  return saves.find(item => item.type === preferred)?.path ?? '';
+  return resolveSavePath(store.get(), { exists: fs.existsSync, discover: discoverSaveFiles });
 }
 
 const saveMonitor = new SaveMonitor((slots,filePath) => {
@@ -129,7 +89,7 @@ async function readFinalSnapshot(){
   const saved=new Promise(resolve=>{finalSaveAcknowledged=id=>{if(id===journeyId)resolve()};timer=setTimeout(resolve,3000);});
   try{await saveMonitor.readNow();await saved;}finally{clearTimeout(timer);finalSaveAcknowledged=null;}
 }
-const lifecycle=new GameLifecycle({readFinal:()=>readFinalSnapshot().catch(()=>{}),onClose:()=>{if(store.get().closeAfterGame){if(store.get().keepRunningInBackground){mainWindow?.hide();overlayWindow?.hide();}else{isQuitting=true;app.quit();}}}});
+const lifecycle=new GameLifecycle({readFinal:()=>readFinalSnapshot().catch(()=>{}),onClose:()=>{if(store.get().closeAfterGame){if(store.get().keepRunningInBackground){mainWindow?.hide();}else{isQuitting=true;app.quit();}}}});
 const gameMonitor = new GameMonitor(async running => {
   lifecycle.change(running);
   const settings = store.get();
@@ -137,7 +97,7 @@ const gameMonitor = new GameMonitor(async running => {
   if (running && !gameWasRunning) {
     gameWasRunning = true;
     if(settings.wakeWithGame)mainWindow?.show();
-    if (settings.wakeWithGame && !saveMonitor.filePath) {
+    if (settings.wakeWithGame && settings.activeJourneyId && !saveMonitor.filePath) {
       const save = savePathOrAuto();
       if (save) { store.set({ selectedSavePath: save }); saveMonitor.watch(save); }
     }
@@ -145,6 +105,12 @@ const gameMonitor = new GameMonitor(async running => {
     gameWasRunning = false;
   }
 });
+
+function configureGameMonitor() {
+  const settings = store.get();
+  if (settings.wakeWithGame || settings.closeAfterGame) gameMonitor.start();
+  else { gameMonitor.stop(); lifecycle.stop(); lifecycle.running = false; gameWasRunning = false; }
+}
 
 function launchExecutable(executable) {
   if (!executable || !fs.existsSync(executable)) throw new Error('The configured game executable was not found.');
@@ -188,11 +154,8 @@ function setupIpc() {
     const before = store.get();
     const candidate={...before,...patch};
     if(candidate.selectedSavePath&&!new RegExp(candidate.playMode==='single'?'\\.sl2$':'\\.co2$','i').test(candidate.selectedSavePath))candidate.selectedSavePath='';
-    const shortcutsChanged = ['overlayHotkey','mapOverlayHotkey','overlayEnabled'].some(key=>candidate[key]!==before[key]);
-    if(shortcutsChanged&&!registerHotkeys(candidate)){registerHotkeys(before);throw new Error('Overlay shortcuts are invalid or already in use. Choose different shortcuts.');}
-    let next;
-    try { next = store.set(candidate); }
-    catch(error) { if(shortcutsChanged)registerHotkeys(before);throw error; }
+    const next = store.set(candidate);
+    configureGameMonitor();
     if (next.startWithWindows !== before.startWithWindows) configureLoginItem();
     if (next.playMode !== before.playMode) { const save=savePathOrAuto();store.set({selectedSavePath:save});lastSlots=[];saveMonitor.watch(save); }
     else if (next.selectedSavePath !== before.selectedSavePath) saveMonitor.watch(next.selectedSavePath);
@@ -230,23 +193,13 @@ function setupIpc() {
     if (!ok) throw new Error('Windows did not create the shortcut.');
     return link;
   });
-  ipcMain.handle('desktop:set-overlay-payload', (_event, payload) => {
-    overlayPayload = payload && typeof payload === 'object' ? payload : overlayPayload;
-    if (overlayWindow?.isVisible()) overlayWindow.webContents.send('desktop:overlay-payload', { ...overlayPayload, overlayMode });
-    const notice = shouldNotify({ warnings: overlayPayload.warnings ?? [], areaNpcCount: overlayPayload.npcs?.length ?? 0, settings: store.get() });
-    const signature = notice ? `${notice}:${(overlayPayload.warnings ?? []).map(w => w.id ?? w.title).join('|')}:${notice === 'area' ? (overlayPayload.npcs ?? []).map(n => n.id).join('|') : ''}` : '';
-    if (notice && gameMonitor.running && signature !== lastAutoNoticeSignature) toggleOverlay(true);
-    lastAutoNoticeSignature = signature;
-    return true;
-  });
-  ipcMain.handle('desktop:toggle-overlay', (_event, mode='guide') => toggleOverlay(undefined, mode === 'map' ? 'map' : 'guide'));
   ipcMain.handle('desktop:list-journeys', () => journeyStore.list());
   ipcMain.handle('desktop:create-journey', (_event, input) => journeyStore.create(input ?? {}));
   ipcMain.handle('desktop:load-journey', (_event, id) => {
-    const journey=journeyStore.load(id),p=journey.state.profiles?.[journey.state.active??0]??{};
-    saveMonitor.stop();lastSlots=[];overlayPayload={area:'Choose a character',warnings:[],npcs:[]};send('desktop:overlay-payload',overlayPayload);
+    const journey=journeyStore.load(id),p=localPlayerState(journey.state);
+    saveMonitor.stop();lastSlots=[];
     store.set({activeJourneyId:id,playMode:journey.playMode,multiplayerRole:p.role??'joiner',selectedSavePath:p.savePath??'',selectedSlot:p.character?.slot??null});
-    const save=savePathOrAuto();store.set({selectedSavePath:save});saveMonitor.watch(save);
+    const save=savePathOrAuto();if(save)store.set({selectedSavePath:save});saveMonitor.watch(save);
     return journey;
   });
   ipcMain.handle('desktop:save-journey', (_event, id, state, patch) => {const saved=journeyStore.save(id,state,patch??{});finalSaveAcknowledged?.(id);return saved;});
@@ -263,7 +216,11 @@ function setupIpc() {
   ipcMain.handle('desktop:knowledge-encounters', () => knowledgeUpdater.encounters());
   ipcMain.handle('desktop:update-knowledge', () => knowledgeUpdater.check());
   ipcMain.handle('desktop:import-knowledge', async () => {const result=await dialog.showOpenDialog(mainWindow,{title:'Import searchable Elden Ring marker/item catalog',properties:['openFile'],filters:[{name:'JSON catalog',extensions:['json']}]});if(result.canceled||!result.filePaths[0])return null;return knowledgeUpdater.importMarkers(result.filePaths[0]);});
-  ipcMain.handle('desktop:open-game-movies', async () => {const detected=discoverGameInstall(),movieDir=detected.gameDir?path.join(detected.gameDir,'movie'):'';if(!movieDir||!fs.existsSync(movieDir))throw new Error('Elden Ring movie folder was not found.');return shell.openPath(movieDir);});
+  ipcMain.handle('desktop:open-game-movies', () => listLocalMovies(discoverGameInstall().gameDir));
+  ipcMain.handle('desktop:choose-video', async () => {
+    const result=await dialog.showOpenDialog(mainWindow,{title:'Play a local video',properties:['openFile'],filters:[{name:'Playable video',extensions:['mp4','webm','ogv']} ]});
+    return result.canceled?null:playableMovie(result.filePaths[0]);
+  });
   ipcMain.handle('desktop:show-main', () => { mainWindow?.show(); mainWindow?.focus(); return true; });
   ipcMain.handle('desktop:check-updates', async () => {
     if (!app.isPackaged) return { state: 'dev', message: 'Update checks run in packaged builds.' };
@@ -272,7 +229,6 @@ function setupIpc() {
   });
   ipcMain.handle('desktop:install-update', () => { if (app.isPackaged) autoUpdater.quitAndInstall(); return true; });
   ipcMain.handle('desktop:open-external', (_event, url) => { if (/^https?:\/\//i.test(url)) return shell.openExternal(url); return false; });
-  ipcMain.on('desktop:overlay-action', (_event, action) => mainWindow?.webContents.send('desktop:overlay-action', action));
 }
 
 app.on('second-instance', (_event, argv) => {
@@ -286,18 +242,17 @@ app.whenReady().then(() => {
   store = new SettingsStore(app.getPath('userData'));
   journeyStore = new JourneyStore(app.getPath('userData'));
   knowledgeUpdater = new KnowledgeUpdater(app.getPath('userData'));
-  createMainWindow(); createOverlayWindow(); setupIpc(); configureUpdater(); configureLoginItem();
+  createMainWindow(); setupIpc(); configureUpdater(); configureLoginItem();
   const icon=nativeImage.createFromPath(path.join(__dirname,'icon.png'));
-  tray=new Tray(icon);tray.setToolTip('Guidance of Grace');tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Guidance of Grace',click:()=>{mainWindow?.show();mainWindow?.focus()}},{label:'Toggle overlay',click:()=>toggleOverlay()},{type:'separator'},{label:'Quit',click:()=>{isQuitting=true;app.quit()}}]));tray.on('double-click',()=>mainWindow?.show());
-  registerHotkeys(store.get());
-  gameMonitor.start();
+  tray=new Tray(icon);tray.setToolTip('Guidance of Grace');tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Guidance of Grace',click:()=>{mainWindow?.show();mainWindow?.focus()}},{type:'separator'},{label:'Quit',click:()=>{isQuitting=true;app.quit()}}]));tray.on('double-click',()=>mainWindow?.show());
+  configureGameMonitor();
   const launchIndex = process.argv.indexOf('--launch-mode');
   if (launchIndex >= 0 && process.argv[launchIndex + 1]) setTimeout(() => launchExecutable(configuredGame(process.argv[launchIndex + 1])), 800);
   if (app.isPackaged && fs.existsSync(path.join(process.resourcesPath,'app-update.yml')) && store.get().checkForUpdates) setTimeout(() => void autoUpdater.checkForUpdates().catch(() => {}), 5000);
   if (store.get().knowledgeAutoUpdate) setTimeout(() => void knowledgeUpdater.check().then(status=>send('desktop:knowledge',status)).catch(()=>{}), 8000);
 });
 
-app.on('before-quit', () => { isQuitting = true; lifecycle.stop();saveMonitor.stop(); gameMonitor.stop(); globalShortcut.unregisterAll(); });
+app.on('before-quit', () => { isQuitting = true; lifecycle.stop();saveMonitor.stop(); gameMonitor.stop(); });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !store?.get().keepRunningInBackground) app.quit();
 });

@@ -1,7 +1,7 @@
 import { planSession } from './content/session-planner.js';
 import { parseSave, formatPlaytime } from './save-parser.js';
 import { QUESTS, BRANCHES, REGIONS, FLAG_LABELS, TRANSITION_RISKS, getStage, getTransitionRisk, questAvailable } from './data.js';
-import { cloudStatus, consumeAuthRedirect, loadUser, sendMagicLink, signOut, createCampaign, joinCampaign, listCampaigns, setCampaign, pushProfile, fetchCampaign } from './cloud.js';
+import { migrateJourneyState } from './content/journey-state.js';
 import { AREA_RECOMMENDATIONS, BOSS_RECOMMENDATIONS, recommendationForMap } from './content/recommendations.js';
 import { STORY_BEATS, unlockedStory, GLOSSARY, THEORY_CARDS, STORY_VIDEOS, glossaryById } from './content/story-data.js';
 import { QUEST_ITEM_LINKS, questItemsFor } from './content/item-links.js';
@@ -20,17 +20,17 @@ const LEGACY_KEY = 'guidance-of-grace-v1';
 const SPOILERS = new Set(['low','balanced','full']);
 const MODES = new Set(['Explorer','Guide']);
 const defaultProfile = (name,mode) => ({ name, mode, playMode:'seamless', role:'joiner', scaduLevel:null, endingTarget:'undecided', sessionMinutes:90, spoiler:mode==='Explorer'?'low':'balanced', showAll:false, quest:{}, ledger:{}, character:null, lastSync:null, recentChanges:[], recentWarnings:[] });
-const defaultState = () => ({ version:3, active:0, profiles:[defaultProfile('New Tarnished','Explorer'),defaultProfile('Guide 1','Guide'),defaultProfile('Guide 2','Guide')] });
+const defaultState = () => ({ version:4, player:defaultProfile('Tarnished','Explorer') });
 
 let state = loadState();
 let pendingSave = null;
-let remoteStates = [];
+
 let desktopSettings = null;
 let desktopGameRunning = false;
 let mapLayer = 'base';
 let mapFocus = null;
 let renderedLocalTarget=null;
-let overlayMapTarget = null;
+let visibleEventIds = new Set();
 let activeJourneyId = null;
 let switchingJourney=false;
 let encounterCatalog=GENERATED_BOSSES;
@@ -38,7 +38,7 @@ let journeyList = [];
 let journeyDialogResolve = null;
 let supplementalKnowledge = [];
 let KNOWLEDGE_INDEX = buildKnowledgeIndex({bosses:GENERATED_BOSSES,quests:QUESTS,forgeSupply:FORGE_SUPPLY,storyBeats:STORY_BEATS,glossary:GLOSSARY,questItems:QUEST_ITEM_LINKS});
-const saveHandles = [null,null,null];
+let saveHandle = null;
 
 function cleanCharacter(raw){
   if(!raw||typeof raw!=='object'||typeof raw.name!=='string'||!Number.isFinite(raw.level)||!raw.flags||typeof raw.flags!=='object')return null;
@@ -72,11 +72,7 @@ function cleanProfile(raw={},fallback=defaultProfile('Tarnished','Guide')){
     recentWarnings:Array.isArray(raw.recentWarnings)?raw.recentWarnings.filter(id=>typeof id==='string'&&getTransitionRisk(id)).slice(0,8):[],
   };
 }
-function sanitizeState(raw){
-  const base=defaultState(), profiles=base.profiles.map((p,i)=>cleanProfile(raw?.profiles?.[i],p));
-  const active=Number.isInteger(raw?.active)&&raw.active>=0&&raw.active<3?raw.active:0;
-  return {version:3,active,profiles};
-}
+function sanitizeState(raw){return migrateJourneyState(raw,cleanProfile,defaultProfile('Tarnished','Explorer'));}
 function loadState(){
   try{
     const current=localStorage.getItem(STORAGE_KEY), legacy=localStorage.getItem(LEGACY_KEY);
@@ -88,7 +84,7 @@ function loadState(){
 function saveState(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state));if(!switchingJourney&&activeJourneyId&&window.guidanceDesktop?.isDesktop)void window.guidanceDesktop.saveJourney(activeJourneyId,state,{playMode:profile().playMode}).catch(error=>{$('#journeyStatus').textContent=`Journey could not be saved: ${error.message}`})}
 async function flushJourney(){if(activeJourneyId&&window.guidanceDesktop)await window.guidanceDesktop.saveJourney(activeJourneyId,state,{playMode:profile().playMode});}
 async function refreshKnowledge(){if(!window.guidanceDesktop)return;supplementalKnowledge=await window.guidanceDesktop.knowledgeCatalog();encounterCatalog=await window.guidanceDesktop.knowledgeEncounters();KNOWLEDGE_INDEX=buildKnowledgeIndex({bosses:encounterCatalog,quests:QUESTS,forgeSupply:FORGE_SUPPLY,storyBeats:STORY_BEATS,glossary:GLOSSARY,questItems:QUEST_ITEM_LINKS});}
-function profile(){return state.profiles[state.active]}
+function profile(){return state.player}
 function flags(){return profile().character?.flags??{}}
 function stage(){return getStage(flags())}
 function questDone(q,p=profile()){return new Set(p.quest[q.id]??[])}
@@ -144,44 +140,40 @@ function mapRegionForName(value=''){
 }
 function currentQuestStep(q){const done=questDone(q),i=q.steps.findIndex((_,index)=>!done.has(index)),index=i<0?Math.max(0,q.steps.length-1):i;return {index,step:q.steps[index]};}
 function questLocation(q){const {step}=currentQuestStep(q);return {name:q.name,location:step?.area||q.area,hint:step?.clue||q.hint,region:mapRegionForName(step?.area)||q.regions.find(id=>REGIONS.some(r=>r.id===id))||q.regions[0]||null};}
-function locateTarget(target){if(!target)return;mapFocus=target;overlayMapTarget=target;profile().pinnedTarget=target;saveState();activateView('map');renderMap();void renderLocalTarget(target);const region=target.region&&REGIONS.some(r=>r.id===target.region)?target.region:mapRegionForName(`${target.regionName??''} ${target.region??''} ${target.location??''}`);if(region){const model=REGIONS.find(r=>r.id===region);mapLayer=model?.mapLayer==='shadow'?'shadow':'base';activateView('map');renderMap();requestAnimationFrame(()=>inspectRegion(region));}syncOverlay();}
+function locateTarget(target){if(!target)return;mapFocus=target;profile().pinnedTarget=target;saveState();activateView('map');renderMap();void renderLocalTarget(target);const region=target.region&&REGIONS.some(r=>r.id===target.region)?target.region:mapRegionForName(`${target.regionName??''} ${target.region??''} ${target.location??''}`);if(region){const model=REGIONS.find(r=>r.id===region);mapLayer=model?.mapLayer==='shadow'?'shadow':'base';activateView('map');renderMap();requestAnimationFrame(()=>inspectRegion(region));}}
 
 async function renderLocalTarget(target){
   if(!target||!Number.isFinite(target.x)||!window.guidanceDesktop)return;
   const crop=await window.guidanceDesktop.localMap(target);
   if(mapFocus!==target)return;
-  $('#mapInspector').innerHTML=`<article class="map-focus"><p class="eyebrow">PINNED LOCAL LOCATION</p><h2>${esc(target.name)}</h2><p>${esc(target.location)}</p><p>${esc(target.hint)}</p><button class="text-button" data-pin-overlay>Show in overlay →</button></article>`;
+  $('#mapInspector').innerHTML=`<article class="map-focus"><p class="eyebrow">PINNED LOCAL LOCATION</p><h2>${esc(target.name)}</h2><p>${esc(target.location)}</p><p>${esc(target.hint)}</p></article>`;
   if(crop){renderedLocalTarget=target;$('#mapPins').innerHTML=`<span class="local-target-dot" style="left:${crop.x}%;top:${crop.y}%" aria-label="Pinned target">⟡</span>`;$('#worldMap').src=crop.image;$('#mapCredit').textContent='Local game map · cropped around your requested target · no game modification';}
 }
 
 function locateQuest(id){const q=QUESTS.find(x=>x.id===id);if(q)locateTarget(questLocation(q));}
-function knowledgeVisible(item){if(profile().showAll)return true;if(item.type==='encounter'&&profile().spoiler!=='full'&&!profile().character?.eventIds?.includes(item.flagId)){const query=$('#knowledgeSearch')?.value.trim().toLowerCase();if(!query||query.length<3||!item.title?.toLowerCase().includes(query))return false;}if(item.id?.startsWith('local:'))return Boolean(item.eventId&&profile().character?.eventIds?.includes(item.eventId));if(item.type==='quest'){const q=QUESTS.find(x=>x.id===item.questId);return Boolean(q&&(questRelevant(q)||hasStarted(q)))}if(item.type==='story')return unlockedStory(flags()).some(b=>b.id===item.storyId);if(item.type==='glossary')return unlockedGlossary().some(g=>g.id===item.glossaryId);if(item.type==='forge'){const source=FORGE_SUPPLY.find(x=>x.id===item.forgeId);return Boolean(source?.when(flags()))}if(item.type==='item')return QUEST_ITEM_LINKS.some(x=>x.key===item.itemKey&&x.when(flags()));const regionId=mapRegionForName(`${item.region??''} ${item.location??''}`);const region=REGIONS.find(r=>r.id===regionId);return region?regionReached(region):false;}
-function overlayPayload(){
-  const c=profile().character,dialogue=dialogueRule(profile().playMode,profile().role);
-  const warnings=activeTransitionRisks().slice(0,3).map(r=>({id:r.id,level:r.level==='warn'?'warning':r.level,title:r.title,text:riskText(r),questId:(r.questIds??[]).find(id=>questRelevant(QUESTS.find(q=>q.id===id)))}));
-  const ending=endingWarning(profile().endingTarget,flags());if(ending)warnings.unshift({...ending,id:'mending-path'});
-  const nearby=areaQuests().slice(0,2).map(q=>({id:q.id,name:q.name,hint:q.hint}));
-  const npcs=nearby.map(n=>({...n,...questLocation(QUESTS.find(q=>q.id===n.id))}));
-  return {area:mapLabel(),character:c?`${c.name} · Lv ${c.level}${desktopGameRunning?' · game running':''}`:'No save connected',readiness:currentReadiness(),role:profile().playMode==='single'?'Single Player':profile().role==='host'?'Story Host':'Joiner',dialogue,hotkey:desktopSettings?.overlayHotkey,mapHotkey:desktopSettings?.mapOverlayHotkey,mapTarget:overlayMapTarget,npcs,warnings:warnings.slice(0,3),suggestions:sessionIdeas()};
+function knowledgeVisible(item){if(profile().showAll)return true;if(item.type==='encounter'&&profile().spoiler!=='full'&&!visibleEventIds.has(item.flagId)){const query=$('#knowledgeSearch')?.value.trim().toLowerCase();if(!query||query.length<3||!item.title?.toLowerCase().includes(query))return false;}if(item.id?.startsWith('local:'))return Boolean(item.eventId&&visibleEventIds.has(item.eventId));if(item.type==='quest'){const q=QUESTS.find(x=>x.id===item.questId);return Boolean(q&&(questRelevant(q)||hasStarted(q)))}if(item.type==='story')return unlockedStory(flags()).some(b=>b.id===item.storyId);if(item.type==='glossary')return unlockedGlossary().some(g=>g.id===item.glossaryId);if(item.type==='forge'){const source=FORGE_SUPPLY.find(x=>x.id===item.forgeId);return Boolean(source?.when(flags()))}if(item.type==='item')return QUEST_ITEM_LINKS.some(x=>x.key===item.itemKey&&x.when(flags()));const regionId=mapRegionForName(`${item.region??''} ${item.location??''}`);const region=REGIONS.find(r=>r.id===regionId);return region?regionReached(region):false;}
+function render(){
+  document.body.classList.toggle('show-all',profile().showAll);
+  $('#globalShowAll').checked=profile().showAll;
+  $$('.desktop-only').forEach(el=>el.classList.toggle('hidden',!window.guidanceDesktop?.isDesktop));
+  renderProfiles();renderHome();renderMendingPaths();renderActiveView();
 }
-function syncOverlay(){if(window.guidanceDesktop?.isDesktop)void window.guidanceDesktop.setOverlayPayload(overlayPayload())}
-
-function render(){document.body.classList.toggle('show-all',profile().showAll);$('#globalShowAll').checked=profile().showAll;renderProfiles();renderHome();renderTransitionWarnings();renderForgeSupply();renderMap();renderQuests();renderChecks();renderSession();renderMendingPaths();renderLedger();renderKnowledgeSearch();renderStory();renderDesktop();renderJourneys();syncOverlay();void renderCloud()}
-function activateView(id){$$('.tab,.view').forEach(x=>x.classList.remove('active'));const tab=$(`.tab[data-view="${id}"]`);if(tab)tab.classList.add('active');$(`#${id}`)?.classList.add('active');window.scrollTo({top:0,behavior:'smooth'})}
-
-function renderProfiles(){
-  $('#profileSelect').innerHTML=state.profiles.map((p,i)=>`<option value="${i}" ${i===state.active?'selected':''}>${esc(p.name)}</option>`).join('');
-  $('#spoilerSelect').value=profile().spoiler;
-  $('#profileCards').innerHTML=state.profiles.map((p,i)=>`<article class="panel profile-card"><p class="eyebrow">${esc(p.mode.toUpperCase())} VIEW · ${p.playMode==='single'?'SINGLE PLAYER':p.role==='host'?'STORY HOST':'JOINER'}</p><input type="text" data-profile-name="${i}" value="${esc(p.name)}" aria-label="Profile ${i+1} name"><select data-profile-mode="${i}" aria-label="Profile ${i+1} guidance mode"><option ${p.mode==='Explorer'?'selected':''}>Explorer</option><option ${p.mode==='Guide'?'selected':''}>Guide</option></select><select data-profile-play="${i}" aria-label="Profile ${i+1} play mode"><option value="single" ${p.playMode==='single'?'selected':''}>Single Player</option><option value="seamless" ${p.playMode==='seamless'?'selected':''}>Seamless Co-op</option></select>${p.playMode==='seamless'?`<select data-profile-role="${i}" aria-label="Profile ${i+1} co-op role"><option value="host" ${p.role==='host'?'selected':''}>Story Host</option><option value="joiner" ${p.role==='joiner'?'selected':''}>Joiner</option></select>`:''}<p class="meta">${p.character?`${esc(p.character.name)} · Lv ${p.character.level}`:'No save character connected'}</p><p>${p.mode==='Explorer'?'Minimal spoilers and a small decision set.':'Clearer progression context for helping without backseat-driving.'}</p></article>`).join('');
+function renderActiveView(){
+  const id=$('.view.active')?.id??'home';
+  const renderers={home:()=>{renderTransitionWarnings();renderForgeSupply()},map:renderMap,quests:renderQuests,check:renderChecks,session:renderSession,mending:renderMendingPaths,ledger:renderLedger,search:renderKnowledgeSearch,story:renderStory,desktop:renderDesktop,profiles:renderJourneys};
+  renderers[id]?.();
 }
+function activateView(id){$$('.tab,.view').forEach(x=>x.classList.remove('active'));const tab=$(`.tab[data-view="${id}"]`);if(tab){tab.classList.add('active');const group=tab.closest('details');if(group)group.open=true;}$(`#${id}`)?.classList.add('active');renderActiveView();window.scrollTo({top:0,behavior:'smooth'})}
+
+function renderProfiles(){ $('#spoilerSelect').value=profile().spoiler; }
 function renderJourneys(){
   const panel=$('#journeyPanel');if(!panel)return;const desktop=Boolean(window.guidanceDesktop?.isDesktop);panel.classList.toggle('hidden',!desktop);if(!desktop)return;
   const select=$('#journeySelect');if(select)select.innerHTML=journeyList.map(j=>`<option value="${esc(j.id)}" ${j.id===activeJourneyId?'selected':''}>${esc(j.name)} · ${j.playMode==='single'?'Single Player':'Seamless'}</option>`).join('')||'<option>No journeys yet</option>';
   const current=journeyList.find(j=>j.id===activeJourneyId);$('#journeyStatus').textContent=current?`Current: ${current.name} · ${current.playMode==='single'?'Single Player':'Seamless Co-op'} · saved ${new Date(current.updatedAt).toLocaleString()}`:'Choose or create a companion journey.';
 }
 async function refreshJourneys(){if(!window.guidanceDesktop?.isDesktop)return [];journeyList=await window.guidanceDesktop.listJourneys();renderJourneys();return journeyList;}
-async function loadJourney(id){if(!window.guidanceDesktop?.isDesktop||!id)return;await flushJourney();switchingJourney=true;try{const journey=await window.guidanceDesktop.loadJourney(id);state=sanitizeState(journey.state);activeJourneyId=journey.id;profile().playMode=journey.playMode;desktopSettings=await window.guidanceDesktop.getSettings();profile().savePath=desktopSettings.selectedSavePath;overlayMapTarget=profile().pinnedTarget;mapFocus=overlayMapTarget;pendingSave=null;localStorage.setItem(STORAGE_KEY,JSON.stringify(state));await refreshJourneys();}finally{switchingJourney=false;}render();await window.guidanceDesktop.readSave().catch(()=>{});}
-async function createJourney(playMode){const starter=defaultState();for(const p of starter.profiles)p.playMode=playMode;const name=playMode==='single'?'Single Player Journey':'Seamless Co-op Journey',journey=await window.guidanceDesktop.createJourney({name,playMode,state:starter});await refreshJourneys();await loadJourney(journey.id);$('#journeyDialog')?.close();return journey;}
+async function loadJourney(id){if(!window.guidanceDesktop?.isDesktop||!id)return;await flushJourney();switchingJourney=true;try{const journey=await window.guidanceDesktop.loadJourney(id);state=sanitizeState(journey.state);activeJourneyId=journey.id;profile().playMode=journey.playMode;desktopSettings=await window.guidanceDesktop.getSettings();profile().savePath=desktopSettings.selectedSavePath;mapFocus=profile().pinnedTarget;pendingSave=null;localStorage.setItem(STORAGE_KEY,JSON.stringify(state));await refreshJourneys();}finally{switchingJourney=false;}render();await window.guidanceDesktop.readSave().catch(()=>{});}
+async function createJourney(playMode){const starter=defaultState();starter.player.playMode=playMode;const name=playMode==='single'?'Single Player Journey':'Seamless Co-op Journey',journey=await window.guidanceDesktop.createJourney({name,playMode,state:starter});await refreshJourneys();await loadJourney(journey.id);$('#journeyDialog')?.close();return journey;}
 async function chooseJourneyOnLaunch(){if(!window.guidanceDesktop?.isDesktop)return;await refreshJourneys();if(!journeyList.length){const migrated=await window.guidanceDesktop.createJourney({name:profile().playMode==='single'?'Single Player Journey':'Seamless Co-op Journey',playMode:profile().playMode,state});journeyList=await window.guidanceDesktop.listJourneys();activeJourneyId=migrated.id;}
   const dialog=$('#journeyDialog'),choices=$('#journeyChoices');if(!dialog||!choices){await loadJourney(desktopSettings?.activeJourneyId||journeyList[0]?.id);return}
   choices.innerHTML=journeyList.map(j=>`<button type="button" class="character-choice" data-journey-id="${esc(j.id)}"><strong>${j.id===desktopSettings?.activeJourneyId?"Continue · ":""}${esc(j.name)}</strong><span>${j.playMode==='single'?'Single Player':'Seamless Co-op'} · ${new Date(j.updatedAt).toLocaleDateString()}</span></button>`).join('');await new Promise(resolve=>{journeyDialogResolve=resolve;dialog.showModal()});
@@ -189,15 +181,15 @@ async function chooseJourneyOnLaunch(){if(!window.guidanceDesktop?.isDesktop)ret
 
 function renderHome(){
   const p=profile(),s=stage(),c=p.character,f=flags();
-  $('#heroTitle').textContent=c?s.title:'You’re doing fine.';
-  $('#heroSummary').textContent=c?s.summary:'Connect an Elden Ring save and I’ll keep the guidance intentionally light.';
+  $('#heroTitle').textContent=c?s.area:'Choose a character';
+  $('#heroSummary').textContent=c?s.summary:'Select a journey to read your local save.';
   $('#areaChip').textContent=c?`Current guidance: ${s.area}`:'No save connected';
   $('#characterName').textContent=c?.name??'Not selected';
   $('#characterMeta').textContent=c?`Level ${c.level} · ${formatPlaytime(c.secondsPlayed)}${c.mapName?` · ${c.mapName}`:''}${Number.isInteger(c.scaduLevel)&&f.dlcEntry?` · Scadutree ${c.scaduLevel}`:''}`:'Choose a save file to begin';
   $('#syncTitle').textContent=p.lastSync?`Updated ${new Date(p.lastSync).toLocaleString()}`:'Waiting for a save';
   $('#saveButton').textContent=window.guidanceDesktop?.isDesktop?'Read save now':c?'Update progress':'Connect save';
   $('#syncText').textContent=c?(window.guidanceDesktop?.isDesktop?`Tracking ${c.name}. The desktop watcher re-reads the save when Elden Ring writes it; nothing is written back.`:`Tracking ${c.name}. The browser re-reads the file only when you request an update.`):'The file is read locally and is never modified or uploaded.';
-  $('#branchGrid').innerHTML=BRANCHES.map(b=>`<button class="branch" data-branch="${b.id}"><span class="icon">${b.icon}</span><h3>${esc(b.title)}</h3><p>${esc(b.text)}</p></button>`).join('');
+  $('#branchGrid').innerHTML=BRANCHES.filter(b=>profile().showAll||['nudge','npc','main'].includes(b.id)).map(b=>`<button class="branch" data-branch="${b.id}"><span class="icon">${b.icon}</span><h3>${esc(b.title)}</h3><p>${esc(b.text)}</p></button>`).join('');
   const risk=progressRisk(f);$('#riskChip').textContent=risk.text;$('#riskChip').className=`chip ${risk.level}`;
   const old=$('#readinessHome');if(old)old.remove();
   if(c){const ready=currentReadiness(),boss=bossAhead(),rec=boss??areaRecommendation(),card=document.createElement('div'),name=boss&&(p.spoiler==='full'||p.showAll)?`Major challenge ahead: ${boss.name}`:boss?'Major challenge ahead':'Area readiness',insight=boss?bossInsight(boss.name):null;card.id='readinessHome';card.className=`readiness-card ${ready.state}`;card.innerHTML=`<strong>${esc(name)}</strong><span>${esc(ready.text)}${rec?.note&&(p.showAll||p.spoiler==='full')?` · ${esc(rec.note)}`:''}</span>${insight?`<details class="tarnished-insight"><summary>Whisper of Grace</summary><p><b>Weakness:</b> ${esc(insight.weakness)}</p><p><b>Field note:</b> ${esc(insight.tip)}</p><p><b>If you want an edge:</b> ${esc(insight.exploit)}</p></details>`:''}`;$('.character-card').append(card)}
@@ -228,19 +220,19 @@ function renderTransitionWarnings(){
   const recent=(p.recentWarnings??[]).map(getTransitionRisk).filter(Boolean).map(r=>({r,aftermath:true}));
   const seen=new Set(recent.map(x=>x.r.id));
   const current=activeTransitionRisks().filter(r=>!seen.has(r.id)).map(r=>({r,aftermath:false}));
-  const items=[...recent,...current].slice(0,2);
+  const items=[...recent,...current].slice(0,1);
   panel.classList.toggle('hidden',items.length===0);
   if(!items.length)return;
   $('#transitionWarnings').innerHTML=items.map(({r,aftermath})=>{
     const links=(r.questIds??[]).map(id=>QUESTS.find(q=>q.id===id)).filter(q=>q&&questRelevant(q)).map(q=>`<span class="warning-actions"><button class="text-button" data-open-quest="${q.id}">${esc(q.name)} →</button><button class="text-button" data-locate-quest="${q.id}">Where? ⟡</button></span>`).join('');
-    return `<article class="transition-warning ${r.level}"><p class="eyebrow">${aftermath?'JUST CHANGED':'BEFORE YOU MOVE ON'}</p><h2>${esc(aftermath?r.aftermathTitle??r.title:r.title)}</h2><p>${esc(riskText(r,aftermath))}</p>${links?`<div class="transition-links">${links}</div>`:''}</article>`;
+    return `<article class="transition-warning ${r.level}"><p class="eyebrow">${aftermath?'JUST CHANGED':'BEFORE YOU MOVE ON'}</p><h2>${esc(aftermath?r.aftermathTitle??r.title:r.title)}</h2><details><summary>Tell me why</summary><p>${esc(riskText(r,aftermath))}</p></details>${links?`<div class="transition-links">${links}</div>`:''}</article>`;
   }).join('');
 }
 
 function renderForgeSupply(){
   const panel=$('#forgePanel');if(!panel)return;const reachable=reachableForgeSupply(flags());panel.classList.toggle('hidden',!profile().character||reachable.length===0);if(!profile().character||!reachable.length)return;
-  $('#forgeSummary').textContent=`${reachable.length} permanent upgrade-material source${reachable.length===1?' is':'s are'} now reachable. Exact locations stay hidden until you ask.`;
-  $('#forgeReachable').innerHTML=reachable.slice(0,3).map(item=>`<article class="forge-source"><strong>${profile().spoiler==='full'?esc(item.name):item.family==='somber'?'Somber forge supply available':'Forge supply available'}</strong><span>${esc(item.clue)}</span><button class="text-button" data-forge-reveal="${item.id}">Show me where →</button></article>`).join('');
+  $('#forgeSummary').textContent='Another permanent upgrade-material supply is reachable.';
+  $('#forgeReachable').innerHTML=reachable.slice(0,profile().showAll?3:1).map(item=>`<article class="forge-source"><strong>${profile().showAll||profile().spoiler==='full'?esc(item.name):item.family==='somber'?'Somber forge supply available':'Forge supply available'}</strong><details><summary>Give me a hint</summary><p>${esc(item.clue)}</p></details><button class="text-button" data-forge-reveal="${item.id}">Show me where →</button></article>`).join('');
 }
 
 function recommendation(){
@@ -290,7 +282,7 @@ function renderMap(){
 function inspectRegion(id){
   const r=REGIONS.find(x=>x.id===id);if(!r)return;const reached=regionReached(r),qs=QUESTS.filter(q=>q.regions.includes(id)&&(profile().showAll||questRelevant(q)||hasStarted(q)));
   const missing=QUESTS.flatMap(q=>relevantItemClues(q).filter(item=>item.region===id&&!itemState(item.key))).filter((item,i,list)=>list.findIndex(x=>x.key===item.key)===i).slice(0,5);
-  const focus=mapFocus&&(mapFocus.region===id||mapRegionForName(`${mapFocus.regionName??''} ${mapFocus.location??''}`)===id)?`<article class="map-focus"><p class="eyebrow">PINNED GUIDANCE</p><h3>${esc(mapFocus.name??'Target')}</h3><p>${esc(mapFocus.location??'')}</p>${mapFocus.hint?`<p>${esc(mapFocus.hint)}</p>`:''}<button class="text-button desktop-only ${window.guidanceDesktop?.isDesktop?'':'hidden'}" data-pin-overlay>Show in overlay →</button></article>`:'';
+  const focus=mapFocus&&(mapFocus.region===id||mapRegionForName(`${mapFocus.regionName??''} ${mapFocus.location??''}`)===id)?`<article class="map-focus"><p class="eyebrow">PINNED GUIDANCE</p><h3>${esc(mapFocus.name??'Target')}</h3><p>${esc(mapFocus.location??'')}</p>${mapFocus.hint?`<p>${esc(mapFocus.hint)}</p>`:''}</article>`:'';
   $('#mapInspector').innerHTML=`${focus}<p class="eyebrow">${reached?'SAVE EVIDENCE: REACHED':'NOT CONFIRMED BY TRACKED FLAGS'}</p><h2>${esc(r.name)}</h2><p>${esc(r.clue)}</p><p>${reached?'The save gives us evidence you have reached this broad region. It does not mean every cave, grace, boss, or NPC here is complete.':'Keep this muted until natural exploration or stronger save evidence reaches it.'}</p>${missing.length?`<div class="evidence-box"><strong>QUEST ITEMS TO LOOK FOR</strong>${missing.map(item=>`<p>◇ ${esc(item.name)} — ${esc(item.clue)}</p>`).join('')}</div>`:''}<div>${qs.slice(0,6).map(q=>`<div class="map-quest"><strong>${profile().spoiler==='low'&&!hasStarted(q)?'Possible NPC thread':esc(q.name)}</strong><br><small>${questDone(q).size}/${q.steps.length} manually confirmed</small><br><button class="text-button" data-open-quest="${q.id}">Open thread →</button> <button class="text-button" data-locate-quest="${q.id}">Current location →</button></div>`).join('')}</div>`;
 }
 
@@ -324,7 +316,7 @@ function renderQuests(){
     const evidenceBox=evidence.length?`<div class="evidence-box"><strong>SAVE EVIDENCE · ${esc(confidence.toUpperCase())}</strong>${evidence.map(([,text])=>`<p>✓ ${esc(text)}</p>`).join('')}<p>${esc(profile().playMode==='single'?'Single Player evidence belongs to this character, but conversations still require manual confirmation.':profile().role==='joiner'?'Joiner mode treats shared world flags cautiously. Let the Story Host initiate important NPC dialogue first.':'Story Host mode treats world-state flags as strong evidence, but conversations still require manual confirmation.')}</p></div>`:'';
     const itemClues=relevantItemClues(q);
     const itemBox=itemClues.length?`<div class="item-clues">${itemClues.map(item=>`<div class="item-clue ${itemState(item.key)?'have':''}"><span class="item-state">${itemState(item.key)?'✓':'◇'}</span><div><strong>${esc(item.name)}</strong><p>${itemState(item.key)?'Detected in this character’s save.':esc(item.clue)}</p></div>${!itemState(item.key)?`<button class="text-button" data-region-jump="${esc(item.region)}">Map →</button>`:''}</div>`).join('')}</div>`:'';
-    return `<details class="quest" data-quest-card="${q.id}"><summary><div class="quest-title">${q.image&&desktopSettings?.remotePortraits?`<img class="npc-thumb" data-npc-image data-initials="${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}" src="${safeUrl(q.image.src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:`<span class="npc-fallback">${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}</span>`}<span class="progress-ring">${pct}%</span><div><h3>${esc(q.name)}</h3><div class="area">${esc(profile().showAll||profile().spoiler==='full'?q.area:questLocation(q).location)} · ${done.size}/${q.steps.length}</div><div class="quest-badges">${endingPriority(q.id,profile().endingTarget)?'<span class="badge ending">Mending Path</span>':''}${q.priority==='major'?'<span class="badge">major thread</span>':''}${evidence.length?`<span class="badge evidence">${evidence.length} save clue${evidence.length===1?'':'s'}</span>`:''}${!relevant&&profile().character?'<span class="badge">not current yet</span>':''}</div></div></div><span>＋</span></summary><div class="quest-body ${q.image&&desktopSettings?.remotePortraits?'with-image':''}">${portrait}<div><p class="quest-hint">Spoiler-light clue: ${esc(q.hint)}</p>${questHistory(q,done,evidence)}${evidenceBox}${itemBox}${visibleSteps(q,done).map(({step,i,veiled})=>veiled?`<div class="step veiled-step"><span class="veil-mark">✦</span><span><strong>Veiled by grace</strong><small>Future checkpoint hidden until this story advances.</small></span></div>`:`<label class="step"><input type="checkbox" data-quest="${q.id}" data-step="${i}" ${done.has(i)?'checked':''}><span class="step-copy">${stepCopy(step)}</span></label>`).join('')}</div></div></details>`;
+    return `<details open class="quest" data-quest-card="${q.id}"><summary><div class="quest-title">${q.image&&desktopSettings?.remotePortraits?`<img class="npc-thumb" data-npc-image data-initials="${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}" src="${safeUrl(q.image.src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:`<span class="npc-fallback">${esc(q.name.split(/\s+/).map(x=>x[0]).slice(0,2).join(''))}</span>`}<span class="progress-ring">${pct}%</span><div><h3>${esc(q.name)}</h3><div class="area">${esc(profile().showAll||profile().spoiler==='full'?q.area:questLocation(q).location)} · ${done.size}/${q.steps.length}</div><div class="quest-badges">${endingPriority(q.id,profile().endingTarget)?'<span class="badge ending">Mending Path</span>':''}${q.priority==='major'?'<span class="badge">major thread</span>':''}${evidence.length?`<span class="badge evidence">${evidence.length} save clue${evidence.length===1?'':'s'}</span>`:''}${!relevant&&profile().character?'<span class="badge">not current yet</span>':''}</div></div></div><span>＋</span></summary><div class="quest-body ${q.image&&desktopSettings?.remotePortraits?'with-image':''}">${portrait}<div><p class="quest-hint">Spoiler-light clue: ${esc(q.hint)}</p>${questHistory(q,done,evidence)}${evidenceBox}${itemBox}${visibleSteps(q,done).map(({step,i,veiled})=>veiled?`<div class="step veiled-step"><span class="veil-mark">✦</span><span><strong>Veiled by grace</strong><small>Future checkpoint hidden until this story advances.</small></span></div>`:`<label class="step"><input type="checkbox" data-quest="${q.id}" data-step="${i}" ${done.has(i)?'checked':''}><span class="step-copy">${stepCopy(step)}</span></label>`).join('')}</div></div></details>`;
   }).join('')||'<div class="panel quiet">No matching NPC threads.</div>';
 }
 
@@ -365,6 +357,7 @@ function renderLedger(){
 function renderKnowledgeSearch(){
   const input=$('#knowledgeSearch'),root=$('#knowledgeResults'),toggle=$('#showAllKnowledge'),count=$('#searchCount');if(!input||!root)return;
   if(toggle)toggle.checked=profile().showAll;
+  visibleEventIds=new Set(profile().character?.eventIds??[]);
   const query=input.value.trim(),all=[...KNOWLEDGE_INDEX,...supplementalKnowledge],matches=searchKnowledge(all.filter(knowledgeVisible),query,{limit:160}).map(item=>item.type==='quest'?{...item,location:questLocation(QUESTS.find(q=>q.id===item.questId)).location}:item.type==='location'&&!profile().showAll&&profile().spoiler!=='full'?{...item,enemies:[],description:'Encounter location in a reached region. Explore to learn what waits here.'}:item);
   if(count)count.textContent=`${matches.length}${matches.length===160?'+':''} result${matches.length===1?'':'s'}`;
   const typeLabel={encounter:'Encounter',location:'Location',quest:'NPC thread',forge:'Forge Supply',story:'Book of Knowledge',glossary:'Glossary',item:'Quest item','boss-detail':'Boss detail'};
@@ -395,8 +388,8 @@ function renderKnowledgeStatus(status){const el=$('#knowledgeStatus');if(!el)ret
 function renderDesktop(){
   const isDesktop=Boolean(window.guidanceDesktop?.isDesktop);$$('.desktop-only').forEach(el=>el.classList.toggle('hidden',!isDesktop));if(!isDesktop||!desktopSettings)return;
   const set=(id,value,property='checked')=>{const el=$(id);if(el)el[property]=value};
-  set('#desktopPlayMode',desktopSettings.playMode,'value');set('#desktopRole',desktopSettings.multiplayerRole,'value');set('#overlayHotkey',desktopSettings.overlayHotkey,'value');set('#mapOverlayHotkey',desktopSettings.mapOverlayHotkey,'value');
-  for(const key of ['overlayEnabled','autoShowWarnings','autoShowAreaNpcs','wakeWithGame','closeAfterGame','keepRunningInBackground','startWithWindows','checkForUpdates','autoDownloadUpdates','knowledgeAutoUpdate','remotePortraits'])set(`#${key}`,Boolean(desktopSettings[key]));
+  set('#desktopPlayMode',desktopSettings.playMode,'value');set('#desktopRole',desktopSettings.multiplayerRole,'value');
+  for(const key of ['wakeWithGame','closeAfterGame','keepRunningInBackground','startWithWindows','checkForUpdates','autoDownloadUpdates','knowledgeAutoUpdate','remotePortraits'])set(`#${key}`,Boolean(desktopSettings[key]));
   $('#desktopRoleWrap').classList.toggle('hidden',desktopSettings.playMode==='single');$('#roleExplanation').textContent=roleNote(desktopSettings.multiplayerRole,desktopSettings.playMode);
   $('#desktopSavePath').textContent=desktopSettings.selectedSavePath||'No save selected; the app will prefer a discovered .co2 file for Seamless or .sl2 for vanilla.';
   const parsed=profile().character?.scaduLevel;$('#scaduLevel').value=parsed??profile().scaduLevel??'';$('#scaduLevel').disabled=Number.isInteger(parsed);$('#scaduHelp').textContent=Number.isInteger(parsed)?`Read from save: Scadutree ${parsed} · Revered Spirit Ash ${profile().character?.spiritBlessingLevel??'unknown'}.`:'Automatic blessing read unavailable for this slot; manual fallback is enabled.';
@@ -419,52 +412,24 @@ async function handleSave(file){
   }catch(error){alert(`Could not read this save: ${error.message}`)}
 }
 async function chooseCharacter(slot){
-  const c=pendingSave?.slots.find(s=>s.slot===slot);if(!c)return;if(window.guidanceDesktop)desktopSettings=await window.guidanceDesktop.setSettings({selectedSlot:slot});applyCharacter(c);if($('#characterDialog').open)$('#characterDialog').close();
+  const c=pendingSave?.slots.find(s=>s.slot===slot);if(!c)return;
+  if(window.guidanceDesktop){
+    if(profile().character&&profile().character.slot!==slot)await createJourney(profile().playMode);
+    desktopSettings=await window.guidanceDesktop.setSettings({selectedSlot:slot});
+  }
+  applyCharacter(c);if($('#characterDialog').open)$('#characterDialog').close();
 }
 async function pickOrUpdateSave(){
-  try{if(window.guidanceDesktop?.isDesktop)return window.guidanceDesktop.readSave();let handle=saveHandles[state.active];if(!handle&&window.showOpenFilePicker){[handle]=await window.showOpenFilePicker({types:[{description:'Elden Ring save',accept:{'application/octet-stream':['.co2','.sl2']}}]});saveHandles[state.active]=handle}if(handle)return handleSave(await handle.getFile());$('#saveInput').click()}catch(error){if(error.name!=='AbortError')alert(`Could not open the save: ${error.message}`)}
+  try{if(window.guidanceDesktop?.isDesktop)return window.guidanceDesktop.readSave();let handle=saveHandle;if(!handle&&window.showOpenFilePicker){[handle]=await window.showOpenFilePicker({types:[{description:'Elden Ring save',accept:{'application/octet-stream':['.co2','.sl2']}}]});saveHandle=handle}if(handle)return handleSave(await handle.getFile());$('#saveInput').click()}catch(error){if(error.name!=='AbortError')alert(`Could not open the save: ${error.message}`)}
 }
 
-function exportTracker(){
-  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='guidance-of-grace-tracker.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-}
-async function importTracker(file){
-  try{const parsed=JSON.parse(await file.text());if(!parsed||!Array.isArray(parsed.profiles))throw new Error('This does not look like a Guidance of Grace export.');state=sanitizeState(parsed);saveState();render()}catch(error){alert(`Could not import tracker: ${error.message}`)}
-}
-
-function cloudMessage(text,error=false){const el=$('#cloudMessage');el.textContent=text;el.style.color=error?'var(--danger)':'var(--gold2)'}
-async function renderCloud(){
-  const status=cloudStatus();$('#cloudHeading').textContent=status.configured?(status.signedIn?'Shared campaign':'Sign in to share progress'):'Companion profiles stay on this PC';
-  $('#cloudStatusText').textContent=status.configured?'Only derived tracker progress is synced. The .co2 file stays on this computer.':'Each journey keeps its own profiles, spoiler preferences and manual progress. Export a .grace journey to back it up.';
-  $('#cloudAuth').classList.toggle('hidden',!status.configured||status.signedIn);$('#cloudControls').classList.toggle('hidden',!status.configured||!status.signedIn);
-  $('#sendMagicLink').disabled=!status.configured;
-  if(!status.configured)return;
-  if(!status.signedIn)return;
-  try{
-    const user=await loadUser();$('#cloudUser').textContent=user?.email??'signed-in user';const campaigns=await listCampaigns();
-    const selected=cloudStatus().campaignId;$('#campaignSelect').innerHTML='<option value="">Choose a campaign</option>'+campaigns.map(r=>`<option value="${esc(r.campaign_id)}" ${r.campaign_id===selected?'selected':''}>${esc(r.campaigns?.name??'Campaign')} · ${esc(r.role)}</option>`).join('');
-    if(selected){remoteStates=await fetchCampaign(selected);renderRemoteProfiles()}else $('#remoteProfiles').innerHTML='';
-  }catch(error){cloudMessage(error.message,true)}
-}
-function renderRemoteProfiles(){
-  $('#remoteProfiles').innerHTML=remoteStates.length?remoteStates.map(r=>{const p=r.profile??{},c=p.character;return `<article class="remote-card"><strong>${esc(r.display_name||p.name||'Tarnished')} · ${esc(r.role||'member')}</strong><span>${c?`${esc(c.name)} · Lv ${c.level} · ${esc(getStage(c.flags??{}).area)}`:'No synced save character'} · updated ${r.updated_at?new Date(r.updated_at).toLocaleString():'unknown'}</span></article>`}).join(''):'<p>No member has synced a profile yet.</p>';
-}
-
-$('#profileSelect').addEventListener('change',async e=>{await flushJourney();state.active=Number(e.target.value);overlayMapTarget=profile().pinnedTarget;mapFocus=overlayMapTarget;desktopSettings=await window.guidanceDesktop?.setSettings({playMode:profile().playMode,multiplayerRole:profile().role,selectedSavePath:profile().savePath,selectedSlot:profile().character?.slot??null});saveState();render();await window.guidanceDesktop?.readSave();});
 $('#spoilerSelect').addEventListener('change',e=>{profile().spoiler=e.target.value;saveState();render()});
 $('#saveButton').addEventListener('click',pickOrUpdateSave);$('#syncAgain').addEventListener('click',pickOrUpdateSave);
 $('#saveInput').addEventListener('change',e=>{if(e.target.files[0])handleSave(e.target.files[0]);e.target.value=''});
 $('#closeGuidance').addEventListener('click',()=>$('#guidancePanel').classList.add('hidden'));
 $('#questSearch').addEventListener('input',renderQuests);$('#unfinishedOnly').addEventListener('change',renderQuests);$('#relevantOnly').addEventListener('change',renderQuests);
 $('#glossarySearch').addEventListener('input',renderGlossary);
-$('#sessionTime').addEventListener('change',e=>{profile().sessionMinutes=Number(e.target.value)||90;saveState();renderSession();syncOverlay()});
-$('#exportState').addEventListener('click',exportTracker);$('#importStateButton').addEventListener('click',()=>$('#importStateInput').click());$('#importStateInput').addEventListener('change',e=>{if(e.target.files[0])importTracker(e.target.files[0]);e.target.value=''});
-$('#sendMagicLink').addEventListener('click',async()=>{try{const email=$('#cloudEmail').value.trim();if(!email)throw new Error('Enter an email address.');await sendMagicLink(email);cloudMessage('Sign-in link sent. Open it in this browser.')}catch(e){cloudMessage(e.message,true)}});
-$('#cloudSignOut').addEventListener('click',async()=>{await signOut();remoteStates=[];renderCloud()});
-$('#createCampaign').addEventListener('click',async()=>{try{const name=$('#campaignName').value.trim();if(!name)throw new Error('Name the campaign first.');await createCampaign(name,profile().name,profile().mode==='Explorer'?'explorer':'guide');cloudMessage('Campaign created.');await renderCloud()}catch(e){cloudMessage(e.message,true)}});
-$('#joinCampaign').addEventListener('click',async()=>{try{const code=$('#inviteCode').value.trim();if(!code)throw new Error('Enter an invite code.');await joinCampaign(code,profile().name,profile().mode==='Explorer'?'explorer':'guide');cloudMessage('Campaign joined.');await renderCloud()}catch(e){cloudMessage(e.message,true)}});
-$('#campaignSelect').addEventListener('change',e=>{setCampaign(e.target.value);void renderCloud()});
-$('#pushCloud').addEventListener('click',async()=>{try{await pushProfile(profile());cloudMessage('Your derived profile is synced.');await renderCloud()}catch(e){cloudMessage(e.message,true)}});$('#refreshCloud').addEventListener('click',()=>renderCloud());
+$('#sessionTime').addEventListener('change',e=>{profile().sessionMinutes=Number(e.target.value)||90;saveState();renderSession();});
 
 document.addEventListener('click',e=>{
   const tracked=e.target.closest('[data-track-record]');if(tracked){const ids=new Set(profile().tracked??[]),id=tracked.dataset.trackRecord;ids.has(id)?ids.delete(id):ids.add(id);profile().tracked=[...ids];saveState();renderKnowledgeSearch();return;}
@@ -481,7 +446,6 @@ document.addEventListener('click',e=>{
   const locateQ=e.target.closest('[data-locate-quest]');if(locateQ){locateQuest(locateQ.dataset.locateQuest);return}
   const forge=e.target.closest('[data-forge-reveal]');if(forge){revealForge(forge.dataset.forgeReveal);return}
   const record=e.target.closest('[data-locate-record]');if(record){locateKnowledgeRecord(record.dataset.locateRecord);return}
-  if(e.target.closest('[data-pin-overlay]')){if(window.guidanceDesktop?.isDesktop){syncOverlay();void window.guidanceDesktop.toggleOverlay('map')}return}
   const journey=e.target.closest('[data-journey-id]');if(journey){awaitJourneyLoad(journey.dataset.journeyId);return}
   const q=e.target.closest('[data-open-quest]');if(q){openQuest(q.dataset.openQuest)}
 });
@@ -489,10 +453,6 @@ document.addEventListener('error',e=>{const img=e.target.closest?.('img[data-npc
 document.addEventListener('change',e=>{
   if(e.target.matches('[data-ledger]')){profile().ledger[e.target.dataset.ledger]=e.target.checked;saveState();renderLedger();return}
   if(e.target.matches('[data-quest]')){const id=e.target.dataset.quest,step=Number(e.target.dataset.step),set=new Set(profile().quest[id]??[]);e.target.checked?set.add(step):set.delete(step);profile().quest[id]=[...set].sort((a,b)=>a-b);saveState();renderQuests();renderChecks();return}
-  if(e.target.matches('[data-profile-name]')){const i=Number(e.target.dataset.profileName);state.profiles[i].name=e.target.value.trim()||`Profile ${i+1}`;saveState();renderProfiles();return}
-  if(e.target.matches('[data-profile-mode]')){const i=Number(e.target.dataset.profileMode),mode=e.target.value;state.profiles[i].mode=MODES.has(mode)?mode:state.profiles[i].mode;saveState();renderProfiles();return}
-  if(e.target.matches('[data-profile-play]')){void createJourney(e.target.value==='single'?'single':'seamless');return}
-  if(e.target.matches('[data-profile-role]')){const i=Number(e.target.dataset.profileRole);state.profiles[i].role=e.target.value==='host'?'host':'joiner';if(i===state.active)void updateDesktopSettings({multiplayerRole:state.profiles[i].role});else{saveState();renderProfiles()}}
 });
 
 async function awaitJourneyLoad(id){try{await loadJourney(id);$('#journeyDialog')?.close();journeyDialogResolve?.();journeyDialogResolve=null}catch(error){alert(error.message)}}
@@ -522,25 +482,22 @@ async function initDesktop(){
     profile().savePath=payload.filePath;
     pendingSave={slots:payload.slots??[]};
     if(!Number.isInteger(desktopSettings?.selectedSlot)){if(pendingSave.slots.length){$('#characterChoices').innerHTML=pendingSave.slots.map(c=>`<button type="button" class="character-choice" data-slot="${c.slot}"><strong>${esc(c.name)}</strong><span>Level ${c.level}</span></button>`).join('');if(!$('#characterDialog').open)$('#characterDialog').showModal();}return;}
-    const selected=payload.selected??payload.slots?.[0];
-    if(selected){if(Number.isInteger(desktopSettings?.selectedSlot)&&selected.slot!==desktopSettings.selectedSlot){const wanted=payload.slots.find(slot=>slot.slot===desktopSettings.selectedSlot);if(wanted)applyCharacter(wanted,{changedKeys:payload.diff?.changed??[]});else applyCharacter(selected,{changedKeys:payload.diff?.changed??[]})}else applyCharacter(selected,{changedKeys:payload.diff?.changed??[]})}
-    renderDesktop();
+    const selected=payload.slots?.find(slot=>slot.slot===desktopSettings.selectedSlot);
+    if(!selected){$('#syncText').textContent='The selected character is unavailable. Choose a character to continue.';desktopSettings.selectedSlot=null;if(pendingSave.slots.length){$('#characterChoices').innerHTML=pendingSave.slots.map(c=>`<button type="button" class="character-choice" data-slot="${c.slot}"><strong>${esc(c.name)}</strong><span>Level ${c.level}</span></button>`).join('');if(!$('#characterDialog').open)$('#characterDialog').showModal();}return;}
+    if(selected)applyCharacter(selected,{changedKeys:payload.diff?.changed??[]});
+    if($('#desktop').classList.contains('active'))renderDesktop();
   });
-  window.guidanceDesktop.onGame(({running})=>{desktopGameRunning=Boolean(running);syncOverlay();$('#gamePathStatus').textContent=`${running?'Elden Ring is running.':'Elden Ring is not running.'} ${games?.gameDir?`Install: ${games.gameDir}`:''}`});
+  window.guidanceDesktop.onGame(({running})=>{desktopGameRunning=Boolean(running);$('#gamePathStatus').textContent=`${running?'Elden Ring is running.':'Elden Ring is not running.'} ${games?.gameDir?`Install: ${games.gameDir}`:''}`});
   window.guidanceDesktop.onUpdate(update=>{const text={checking:'Checking for updates…',available:`Version ${update.version} is available.`,current:'Guidance of Grace is up to date.',downloading:`Downloading… ${update.percent??0}%`,ready:`Version ${update.version} is ready to install.`,dev:'Update checks run after the app is packaged.',error:`Update error: ${update.message??'unknown error'}`}[update.state]??update.message??update.state;$('#updateStatus').textContent=text;$('#installUpdate').classList.toggle('hidden',update.state!=='ready')});
-  window.guidanceDesktop.onOverlayAction(action=>{if(action?.type==='quest'){mainWindowFocus();openQuest(action.id)}else if(action?.type==='quest-map'){mainWindowFocus();locateQuest(action.id)}else if(action?.type==='map-target'){mainWindowFocus();if(overlayMapTarget)locateTarget(overlayMapTarget)}});
   await window.guidanceDesktop.readSave().catch(()=>{});render();
 }
-function mainWindowFocus(){void window.guidanceDesktop?.showMain()}
 
-for(const [id,key] of [['#desktopPlayMode','playMode'],['#desktopRole','multiplayerRole'],['#overlayHotkey','overlayHotkey'],['#mapOverlayHotkey','mapOverlayHotkey']])$(id).addEventListener('change',e=>void updateDesktopSettings({[key]:e.target.value}));
-for(const key of ['overlayEnabled','autoShowWarnings','autoShowAreaNpcs','wakeWithGame','closeAfterGame','keepRunningInBackground','startWithWindows','checkForUpdates','autoDownloadUpdates','knowledgeAutoUpdate','remotePortraits'])$(`#${key}`).addEventListener('change',e=>void updateDesktopSettings({[key]:e.target.checked}));
-$('#desktopSlot').addEventListener('change',e=>{const slot=Number(e.target.value);if(Number.isInteger(slot)){void updateDesktopSettings({selectedSlot:slot});const c=pendingSave?.slots?.find(x=>x.slot===slot);if(c)applyCharacter(c)}});
-$('#scaduLevel').addEventListener('change',e=>{if(Number.isInteger(profile().character?.scaduLevel))return;const value=e.target.value===''?null:Number(e.target.value);profile().scaduLevel=Number.isInteger(value)&&value>=0&&value<=20?value:null;saveState();renderHome();renderStory();syncOverlay()});
+for(const [id,key] of [['#desktopPlayMode','playMode'],['#desktopRole','multiplayerRole']])$(id).addEventListener('change',e=>void updateDesktopSettings({[key]:e.target.value}));
+for(const key of ['wakeWithGame','closeAfterGame','keepRunningInBackground','startWithWindows','checkForUpdates','autoDownloadUpdates','knowledgeAutoUpdate','remotePortraits'])$(`#${key}`).addEventListener('change',e=>void updateDesktopSettings({[key]:e.target.checked}));
+$('#desktopSlot').addEventListener('change',e=>{const slot=Number(e.target.value);if(Number.isInteger(slot))void chooseCharacter(slot);});
+$('#scaduLevel').addEventListener('change',e=>{if(Number.isInteger(profile().character?.scaduLevel))return;const value=e.target.value===''?null:Number(e.target.value);profile().scaduLevel=Number.isInteger(value)&&value>=0&&value<=20?value:null;saveState();renderHome();renderStory();});
 $('#chooseDesktopSave').addEventListener('click',async()=>{const chosen=await window.guidanceDesktop?.chooseSave();if(chosen){desktopSettings=await window.guidanceDesktop.getSettings();renderDesktop()}});
 $('#refreshDesktopSave').addEventListener('click',()=>window.guidanceDesktop?.readSave());
-$('#previewOverlay').addEventListener('click',()=>window.guidanceDesktop?.toggleOverlay('guide'));
-$('#previewMapOverlay').addEventListener('click',()=>window.guidanceDesktop?.toggleOverlay('map'));
 $('#chooseSeamless').addEventListener('click',async()=>{if(window.guidanceDesktop){await window.guidanceDesktop.chooseGame('seamless');desktopSettings=await window.guidanceDesktop.getSettings();renderDesktop()}});
 $('#chooseVanilla').addEventListener('click',async()=>{if(window.guidanceDesktop){await window.guidanceDesktop.chooseGame('vanilla');desktopSettings=await window.guidanceDesktop.getSettings();renderDesktop()}});
 $('#launchSeamless').addEventListener('click',()=>{if(window.guidanceDesktop)window.guidanceDesktop.launchGame('seamless').catch(error=>alert(error.message))});
@@ -550,7 +507,13 @@ $('#shortcutVanilla').addEventListener('click',()=>{if(window.guidanceDesktop)wi
 $('#checkUpdates').addEventListener('click',async()=>{const result=await window.guidanceDesktop?.checkUpdates();if(result?.state)$('#updateStatus').textContent=result.message??result.state});
 $('#installUpdate').addEventListener('click',()=>window.guidanceDesktop?.installUpdate());
 $('#checkKnowledge').addEventListener('click',async()=>{if(!window.guidanceDesktop)return;$('#knowledgeStatus').textContent='Refreshing licensed knowledge sources…';const status=await window.guidanceDesktop.updateKnowledge();await refreshKnowledge();renderLedger();renderKnowledgeSearch();renderKnowledgeStatus(status)});
-$('#openGameMovies').addEventListener('click',()=>window.guidanceDesktop?.openGameMovies().catch(error=>alert(error.message)));
+function playLocalVideo(movie){if(!movie)return;$('#localVideoTitle').textContent=movie.name;$('#localVideoStatus').textContent='';$('#localVideo').src=movie.url;if(!$('#videoDialog').open)$('#videoDialog').showModal();}
+$('#openGameMovies').addEventListener('click',async()=>{
+  try{const movies=await window.guidanceDesktop.openGameMovies();$('#localMovieList').innerHTML=movies.map((m,i)=>`<li>${esc(m.name)} ${m.supported?`<button class="text-button" data-local-movie="${i}">Play</button>`:'<span class="meta">Bink format · conversion required</span>'}</li>`).join('');$('#localVideoTitle').textContent='Local videos';$('#localVideoStatus').textContent=movies.some(m=>!m.supported)?'Installed cutscenes use Bink 2, which this player cannot decode. Open a locally converted MP4 or WebM to play it here.':movies.length?'Select a video.':'No installed movies found. Open a local video instead.';$('#videoDialog').showModal();$('#localMovieList').onclick=e=>{const b=e.target.closest('[data-local-movie]');if(b)playLocalVideo(movies[Number(b.dataset.localMovie)]);};}catch(error){alert(error.message);}
+});
+$('#chooseLocalVideo').addEventListener('click',async()=>{const movie=await window.guidanceDesktop.chooseVideo();playLocalVideo(movie);});
+$('#localVideo').addEventListener('error',()=>{$('#localVideoStatus').textContent='This video codec is not supported. Try an H.264 MP4 or VP8/VP9 WebM.';});
+$('#videoDialog').addEventListener('close',()=>{$('#localVideo').pause();$('#localVideo').removeAttribute('src');$('#localVideo').load();});
 $('#importKnowledge').addEventListener('click',async()=>{const result=await window.guidanceDesktop?.importKnowledge();if(result){supplementalKnowledge=await window.guidanceDesktop.knowledgeCatalog();renderKnowledgeSearch();alert(`Imported ${result.records} searchable game-data records.`)}});
 $('#journeySelect').addEventListener('change',e=>void awaitJourneyLoad(e.target.value));
 $('#newSingleJourney').addEventListener('click',()=>void createJourney('single'));
@@ -559,10 +522,10 @@ $('#journeyCreateSingle').addEventListener('click',()=>void createJourney('singl
 $('#journeyCreateSeamless').addEventListener('click',()=>void createJourney('seamless').then(()=>{journeyDialogResolve?.();journeyDialogResolve=null}));
 $('#importJourney').addEventListener('click',async()=>{const j=await window.guidanceDesktop?.importJourney();if(j){await refreshJourneys();await loadJourney(j.id)}});
 $('#exportJourney').addEventListener('click',()=>activeJourneyId&&window.guidanceDesktop?.exportJourney(activeJourneyId));
-$('#knowledgeSearch').addEventListener('input',renderKnowledgeSearch);
+let searchTimer;$('#knowledgeSearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(renderKnowledgeSearch,120);});
 $('#showAllKnowledge').addEventListener('change',e=>{profile().showAll=e.target.checked;saveState();render()});
 
-consumeAuthRedirect();
+
 if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
 render();
 void initDesktop();

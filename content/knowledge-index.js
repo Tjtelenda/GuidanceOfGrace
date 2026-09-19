@@ -4,6 +4,14 @@ export const normalizeSearch=value=>String(value??'').toLowerCase().normalize('N
 const words=normalizeSearch;
 const join=(...values)=>values.flat(Infinity).filter(Boolean).join(' ');
 const record=(input)=>({...input,searchText:words(join(input.title,input.subtitle,input.region,input.location,input.tags,input.rewards,input.enemies,input.description,input.steps))});
+const prepared = new WeakMap();
+function searchFields(item) {
+  if (!prepared.has(item)) prepared.set(item, {
+    hay: item.searchText || words(join(item.title,item.subtitle,item.region,item.location,item.tags,item.rewards,item.enemies,item.description)),
+    title: words(item.title), rewards: (item.rewards??[]).map(words),
+  });
+  return prepared.get(item);
+}
 
 export function buildKnowledgeIndex({bosses=[],quests=[],forgeSupply=[],storyBeats=[],glossary=[],questItems=[]}={}){
   const entries=[];
@@ -18,7 +26,13 @@ export function buildKnowledgeIndex({bosses=[],quests=[],forgeSupply=[],storyBea
 }
 
 export function searchKnowledge(index,query,{limit=100}={}){
-  const terms=words(query).split(/\s+/).filter(Boolean);
+  const normalized=words(query),terms=normalized.split(/\s+/).filter(Boolean);
   if(!terms.length)return index.slice(0,limit);
-  return index.map(item=>{const hay=item.searchText||words(join(item.title,item.subtitle,item.region,item.location,item.tags,item.rewards,item.enemies,item.description));return {item,match:terms.every(term=>hay.includes(term)),score:terms.reduce((score,term)=>score+(hay.includes(term)?1:0)+(words(item.title).includes(term)?2:0),0)}}).filter(x=>x.match).sort((a,b)=>b.score-a.score||a.item.title.localeCompare(b.item.title)).slice(0,limit).map(x=>x.item);
+  return index.map(item=>{
+    const {hay,title,rewards}=searchFields(item);
+    const matches=term=>/^\d+$/.test(term)?[title,...rewards].some(value=>value.split(' ').includes(term)):hay.includes(term);
+    const permanentSupply=item.type==='forge'&&rewards.some(value=>value===normalized);
+    const score=(permanentSupply?30:0)+(title===normalized?10:0)+terms.reduce((total,term)=>total+(title.includes(term)?2:0),0);
+    return {item,match:terms.every(matches),score};
+  }).filter(x=>x.match).sort((a,b)=>b.score-a.score||a.item.title.localeCompare(b.item.title)).slice(0,limit).map(x=>x.item);
 }

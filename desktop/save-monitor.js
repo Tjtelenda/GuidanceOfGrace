@@ -149,21 +149,42 @@ export class SaveMonitor {
     this.filePath = '';
     this.watcher = null;
     this.timer = null;
+    this.reading=null;this.cached=null;
     this.generation=0;this.parseFile=parseFile;this.debounceMs=debounceMs;this.stableMs=stableMs;this.onError=onError;
   }
 
-  async readNow() {
-    if (!this.filePath) return [];
-    const file=this.filePath,generation=this.generation;
-    const before=await fs.promises.stat(file);
-    await new Promise(resolve=>setTimeout(resolve,this.stableMs));
-    const stable=await fs.promises.stat(file);
-    if(before.size!==stable.size||before.mtimeMs!==stable.mtimeMs)throw new Error('Save is still being written; waiting for a stable read.');
+  readNow({ notifyUnchanged = true } = {}) {
+    if (!this.filePath) return Promise.resolve([]);
+    if (this.reading?.generation === this.generation) {
+      this.reading.notifyUnchanged ||= notifyUnchanged;
+      return this.reading.promise;
+    }
+    const read = { generation: this.generation, notifyUnchanged };
+    this.reading = read;
+    read.promise = this.readStable(read).finally(() => {
+      if (this.reading === read) this.reading = null;
+    });
+    return read.promise;
+  }
+
+  async readStable(read) {
+    const file = this.filePath;
+    const signature = stat => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+    const before = await fs.promises.stat(file);
+    await new Promise(resolve => setTimeout(resolve, this.stableMs));
+    const stable = await fs.promises.stat(file);
+    if (signature(before) !== signature(stable)) throw new Error('Save is still being written; waiting for a stable read.');
+    if (read.generation !== this.generation) return [];
+    if (this.cached?.signature === signature(stable)) {
+      if (read.notifyUnchanged) this.onSnapshot?.(this.cached.slots, file);
+      return this.cached.slots;
+    }
     const slots = await this.parseFile(file);
-    const after=await fs.promises.stat(file);
-    if(stable.size!==after.size||stable.mtimeMs!==after.mtimeMs)throw new Error('Save changed during parsing; waiting for the next read.');
-    if(generation!==this.generation)return [];
-    this.onSnapshot?.(slots,file);
+    const after = await fs.promises.stat(file);
+    if (signature(stable) !== signature(after)) throw new Error('Save changed during parsing; waiting for the next read.');
+    if (read.generation !== this.generation) return [];
+    this.cached = { signature: signature(after), slots };
+    this.onSnapshot?.(slots, file);
     return slots;
   }
 
@@ -179,10 +200,11 @@ export class SaveMonitor {
     this.schedule(0);
   }
 
-  schedule(delay=this.debounceMs,attempt=0){clearTimeout(this.timer);this.timer=setTimeout(()=>void this.readNow().catch(error=>{this.onError(error);if(attempt<5&&this.filePath)this.schedule(this.debounceMs,attempt+1)}),delay);}
+  schedule(delay=this.debounceMs,attempt=0){const generation=this.generation;clearTimeout(this.timer);this.timer=setTimeout(()=>void this.readNow({notifyUnchanged:false}).catch(error=>{if(generation!==this.generation)return;this.onError(error);if(attempt<5&&this.filePath)this.schedule(this.debounceMs,attempt+1)}),delay);}
 
   stop() {
     this.generation++;
+    this.reading=null;this.cached=null;
     clearTimeout(this.timer);
     this.timer = null;
     this.watcher?.close();

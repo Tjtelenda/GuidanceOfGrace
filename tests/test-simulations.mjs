@@ -9,6 +9,8 @@ import { JourneyStore } from '../desktop/journey-store.js';
 import { KnowledgeUpdater, normalizeImportedMarkers } from '../desktop/knowledge-updater.js';
 import { GENERATED_BOSSES } from '../content/generated-bosses.js';
 import { SaveMonitor, discoverSaveFiles } from '../desktop/save-monitor.js';
+import { localPlayerState, migrateJourneyState } from '../content/journey-state.js';
+import { listLocalMovies, playableMovie } from '../desktop/local-media.js';
 
 // All filesystem operations are confined to this disposable directory.
 // No Electron launch, real process scan, network request or user save read.
@@ -44,6 +46,26 @@ function lifecycleHarness(readFinal = async () => {}) {
 }
 
 try {
+  await scenario('legacy profiles migrate to one local player without losing recovery data', () => {
+    const old={active:1,profiles:[{name:'Other',showAll:true},{name:'Local',quest:{ranni:[0]},showAll:false}]};
+    const migrated=migrateJourneyState(old,value=>structuredClone(value),{});
+    assert.equal(migrated.version,4);
+    assert.deepEqual(migrated.player,old.profiles[1]);
+    assert.deepEqual(migrated.legacyProfiles,[old.profiles[0]]);
+    assert.equal(localPlayerState(migrated).showAll,false);
+    assert.deepEqual(migrateJourneyState(migrated,value=>structuredClone(value),{}),migrated);
+    assert.deepEqual(old.profiles[1].quest,{ranni:[0]});
+  });
+  await scenario('local movie inventory distinguishes playable files from Bink without opening Explorer', () => {
+    const folder=path.join(root,'game','movie');fs.mkdirSync(folder,{recursive:true});
+    for(const name of ['intro.bk2','fixture.webm','unrelated.txt'])fs.writeFileSync(path.join(folder,name),'synthetic');
+    const movies=listLocalMovies(path.join(root,'game'));
+    assert.equal(movies.length,2);
+    assert.equal(movies.find(m=>m.name==='intro.bk2').supported,false);
+    assert.match(movies.find(m=>m.name==='fixture.webm').url,/^file:/);
+    assert.throws(()=>playableMovie(path.join(folder,'intro.bk2')));
+    assert.deepEqual(listLocalMovies(''),[]);
+  });
   await scenario('duplicate stopped notifications preserve the final read', async () => {
     let reads = 0;
     const h = lifecycleHarness(async () => reads++);

@@ -24,6 +24,9 @@ try {
   const index=buildKnowledgeIndex({bosses:GENERATED_BOSSES,quests:QUESTS,forgeSupply:FORGE_SUPPLY,questItems:QUEST_ITEM_LINKS});
   for(const query of ['Godrick','catacombs','Ranni','bell bearing','smithing stone 3'])assert.ok(searchKnowledge(index,query).length,query);
   assert.ok(searchKnowledge(index,'smithing stone 3').some(x=>x.forgeId==='smithing-2'));
+  const crowded=[...index,...Array.from({length:300},(_,i)=>({id:`pickup:${i}`,title:'Smithing Stone [3]',type:'pickup',description:'Local pickup'})),{id:'wrong-tier',title:'Smithing Stone [6]',description:'Map m60_33_41_00'}];
+  assert.equal(searchKnowledge(crowded,'smithing stone 3')[0].forgeId,'smithing-2','Permanent supply must survive pickup-heavy result limits');
+  assert.ok(!searchKnowledge(crowded,'smithing stone 3',{limit:1000}).some(x=>x.id==='wrong-tier'),'Map identifiers must not match upgrade tiers');
   const short=planSession({minutes:30,legacy:true,risk:true,forge:true,quest:{name:'Fixture',hint:'Current thread',endingPriority:true}});assert.ok(short.every(c=>c.minutes<=30));assert.equal(short[0].priority,100);assert.ok(!short.some(c=>/legacy/.test(c.title)));
   const journeys=new JourneyStore(dir),solo=journeys.create({playMode:'single',state:{showAll:false}}),coop=journeys.create({playMode:'seamless',state:{role:'host',showAll:true}});
   journeys.save(coop.id,{role:'joiner',showAll:true});assert.deepEqual(journeys.load(solo.id).state,{showAll:false});
@@ -41,7 +44,7 @@ try {
   assert.deepEqual(readBlessingLevels(fixture,0),{scaduLevel:10,spiritBlessingLevel:5});fixture[player+245]=11;assert.equal(readBlessingLevels(fixture,0).scaduLevel,null);assert.equal(playerGameDataOffset(fixture,10),null);
   // A synthetic companion-owned fixture only: never write a user's game save.
   const fake=path.join(dir,'synthetic.co2');fs.writeFileSync(fake,'fixture');let reads=0;
-  const monitor=new SaveMonitor(()=>reads++,{parseFile:async()=>[],debounceMs:20,stableMs:5});monitor.watch(fake);await pause(60);reads=0;monitor.schedule();monitor.schedule();monitor.schedule();await pause(70);assert.equal(reads,1);monitor.stop();
+  const monitor=new SaveMonitor(()=>reads++,{parseFile:async()=>[],debounceMs:20,stableMs:5});monitor.watch(fake);await pause(60);reads=0;fs.appendFileSync(fake,'changed');monitor.schedule();monitor.schedule();monitor.schedule();await pause(70);assert.equal(reads,1);monitor.stop();
   const sequence=[];const lifecycle=new GameLifecycle({delay:10,readFinal:async()=>{await pause(5);sequence.push('read')},onClose:()=>sequence.push('close')});lifecycle.change(true);lifecycle.change(false);await pause(40);assert.deepEqual(sequence,['read','close']);lifecycle.stop();
   console.log('PASS: V5 catalog/search, journey isolation/export/import, update rollback/offline, structural blessing bounds, watcher debounce and final read.');
 } finally {fs.rmSync(dir,{recursive:true,force:true});}

@@ -15,3 +15,5 @@
 .local-target-dot{position:absolute;color:#fff2ac;font-size:38px;transform:translate(-50%,-50%);text-shadow:0 0 6px #000,0 0 12px #000}body.show-all .topbar{border-bottom:3px solid #d5ab53}#worldMap:not([src]){visibility:hidden}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 
 body.show-all .brand small::after{content:" · SHOW ALL ACTIVE";color:#efd28c}
+
+.video-dialog-card{width:min(900px,85vw)}#localVideo{display:block;width:100%;max-height:60vh;background:#000}.video-dialog-card form{float:right}#localMovieList{padding-left:20px;font-size:12px}#localMovieList li{padding:7px 0}#localMovieList .meta{margin-left:10px;color:var(--muted)}

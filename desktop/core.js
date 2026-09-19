@@ -1,15 +1,8 @@
-export const DEFAULT_HOTKEY = 'CommandOrControl+Shift+G';
-export const DEFAULT_MAP_HOTKEY = 'CommandOrControl+Shift+M';
 export const GAME_PROCESSES = new Set(['eldenring.exe', 'ersc_launcher.exe', 'start_protected_game.exe']);
 
 export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({
-  overlayHotkey: DEFAULT_HOTKEY,
-  mapOverlayHotkey: DEFAULT_MAP_HOTKEY,
-  overlayEnabled: true,
-  autoShowWarnings: true,
-  autoShowAreaNpcs: false,
   startWithWindows: false,
-  wakeWithGame: true,
+  wakeWithGame: false,
   closeAfterGame: false,
   checkForUpdates: true,
   autoDownloadUpdates: false,
@@ -32,13 +25,8 @@ export function normalizeDesktopSettings(raw = {}) {
   const launchMode = ['seamless', 'vanilla', 'manual'].includes(raw.gameLaunchMode) ? raw.gameLaunchMode : 'seamless';
   return {
     ...DEFAULT_DESKTOP_SETTINGS,
-    overlayHotkey: typeof raw.overlayHotkey === 'string' && raw.overlayHotkey.trim() ? raw.overlayHotkey.trim() : DEFAULT_HOTKEY,
-    mapOverlayHotkey: typeof raw.mapOverlayHotkey === 'string' && raw.mapOverlayHotkey.trim() ? raw.mapOverlayHotkey.trim() : DEFAULT_MAP_HOTKEY,
-    overlayEnabled: raw.overlayEnabled !== false,
-    autoShowWarnings: raw.autoShowWarnings !== false,
-    autoShowAreaNpcs: Boolean(raw.autoShowAreaNpcs),
     startWithWindows: Boolean(raw.startWithWindows),
-    wakeWithGame: raw.wakeWithGame !== false,
+    wakeWithGame: raw.wakeWithGame === true,
     closeAfterGame: Boolean(raw.closeAfterGame),
     checkForUpdates: raw.checkForUpdates !== false,
     autoDownloadUpdates: Boolean(raw.autoDownloadUpdates),
@@ -107,8 +95,11 @@ export function readinessLabel(level, recommendation = {}, scaduLevel = null) {
   return { state: 'ready', text: `Comfortable rune-level range (${runeText})${suffix}` };
 }
 
-export function shouldNotify({ warnings = [], areaNpcCount = 0, settings }) {
-  if (settings.autoShowWarnings && warnings.some(w => w.level === 'danger' || w.level === 'warning')) return 'warning';
-  if (settings.autoShowAreaNpcs && areaNpcCount > 0) return 'area';
-  return null;
+
+// A bound character must never silently switch to another account's save.
+export function resolveSavePath(settings, { exists, discover }) {
+  const preferred = settings.playMode === 'single' ? 'sl2' : 'co2';
+  const bound = settings.selectedSavePath;
+  if (bound) return exists(bound) && bound.toLowerCase().endsWith(`.${preferred}`) ? bound : '';
+  return discover().find(save => save.type === preferred)?.path ?? '';
 }

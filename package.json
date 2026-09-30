@@ -1,10 +1,13 @@
 {
   "name": "guidance-of-grace",
   "productName": "Guidance of Grace",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Offline second-screen Elden Ring companion with read-only local save tracking.",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "24.19.0"
+  },
   "main": "desktop/main.js",
   "scripts": {
     "start": "electron .",
@@ -39,7 +42,8 @@
       "LOCAL_KNOWLEDGE.md",
       "THIRD_PARTY_NOTICES.md",
       "package.json",
-      "desktop-layout.css"
+      "desktop-layout.css",
+      "LICENSE"
     ],
     "win": {
       "target": [
@@ -59,7 +63,27 @@
         "owner": "Tjtelenda",
         "repo": "GuidanceOfGrace"
       }
+    ],
+    "artifactName": "Guidance-of-Grace-Setup-${version}.${ext}",
+    "extraResources": [
+      {
+        "from": "LICENSE",
+        "to": "licenses/LICENSE.project.txt"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "licenses/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "node_modules/@zebbedaja/er-save-parser/LICENSE",
+        "to": "licenses/LICENSE.er-save-parser.txt"
+      },
+      {
+        "from": "content/licenses/ER_Boss_Kill_Checklist.txt",
+        "to": "licenses/LICENSE.encounter-catalog.txt"
+      }
     ]
   },
-  "author": "Guidance of Grace contributors"
+  "author": "Trent Telenda",
+  "license": "MIT"
 }

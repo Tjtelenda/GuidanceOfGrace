@@ -1,6 +1,6 @@
-# Feature audit — 0.6.0
+# Feature audit â€” 0.6.0
 
-Installed 0.6.0 acceptance and publication passed. Final evidence belongs in [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md).
+The original release report records installed 0.6.0 acceptance and publication. The September 30 source review reran synthetic tests and packaging only; distinguish those checks in [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md).
 
 | Area | Current behavior | Verification or limitation |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Installed 0.6.0 acceptance and publication passed. Final evidence belongs in [BU
 | Mending Paths | Discovered paths, priorities and Frenzied Flame override/reversal | Not every branch has been played live |
 | Ledger | 207 unique encounters / 42 DLC | Complete for pinned encounter source, not exhaustive item data |
 | Forge Supply | Four regular and five somber miner bell bearings | Search-chain regression coverage |
-| Search and map | Curated archive plus 14,481 local records and map crops | 3,347 pickup positions; variants and unresolved records documented |
+| Search and map | 523 bundled records; optional separately imported catalog/maps | Optional catalogs/maps are not shipped; coverage is not guaranteed |
 | Books and video | Gated story/glossary, labeled interpretations, inline local MP4/WebM | Synthetic playback tested in installed 0.6.0; .bk2 unsupported |
 | Session planning | Time budget, NPC windows, ending priorities and readiness | Estimates are advisory |
 | Knowledge updates | Trusted identity, schema/checksum checks, atomic cache, offline fallback | Rollback and failure simulations |

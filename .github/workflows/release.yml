@@ -1,26 +1,65 @@
-name: Build Windows release
-
+name: Verify Windows build
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  pull_request:
   workflow_dispatch:
-
 permissions:
-  contents: write
-
+  contents: read
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version-file: .node-version
+          cache: npm
       - run: npm ci
       - run: npm test
       - run: npm run dist:win -- --publish never
+      - name: Check notices and generate checksums
+        shell: pwsh
+        run: |
+          if (!(Test-Path dist/win-unpacked/LICENSE.electron.txt) -or !(Test-Path dist/win-unpacked/LICENSES.chromium.html)) { throw 'Missing Electron/Chromium notices' }
+          foreach ($name in @('LICENSE.project.txt','THIRD_PARTY_NOTICES.md','LICENSE.er-save-parser.txt','LICENSE.encounter-catalog.txt')) { if (!(Test-Path "dist/win-unpacked/resources/licenses/$name")) { throw "Missing $name" } }
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -match '\.(exe|blockmap)$' -or $_.Name -eq 'latest.yml' }
+          $lines = $files | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" }
+          $lines | Set-Content dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: Guidance-of-Grace-Windows
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
+            dist/SHA256SUMS.txt
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: windows
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Guidance-of-Grace-Windows
+          path: release-files
+      - name: Publish verified 0.6.1 artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          test "$version" = "0.6.1"
+          tag="v$version"
+          if gh release view "$tag" --json isDraft --jq '.isDraft' > /tmp/draft 2>/dev/null; then
+            echo "Release already exists; refusing to modify it."
+            exit 0
+          fi
+          (cd release-files && sha256sum --check SHA256SUMS.txt)
+          gh release create "$tag" --target "$GITHUB_SHA" --draft --title "Guidance of Grace $version" --notes-file RELEASE_NOTES.md
+          gh release upload "$tag" release-files/*
+          gh release edit "$tag" --draft=false

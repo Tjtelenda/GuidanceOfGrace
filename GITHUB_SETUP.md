@@ -2,9 +2,13 @@
 
 ## Repository
 
-The authorized public repository is [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace), on main. GitHub CLI authentication is available; no additional sign-in is currently required. The obsolete Household handoff is not used or modified.
+The public repository is [Tjtelenda/GuidanceOfGrace](https://github.com/Tjtelenda/GuidanceOfGrace). Version 0.6.0 remains unchanged; 0.6.1 is the authorized next release. Public release downloads do not require a token embedded in the app.
 
-Version 0.6.0 is published with the tested installer, blockmap, update metadata and SHA-256. Installed live-feed verification passed. The app update provider points to this public repository. Public release downloads do not need a token embedded in the app.
+## Continuous verification
+
+The Windows workflow uses Node from `.node-version` (24.19.0), installs the lockfile with `npm ci`, runs all six synthetic suites, and builds the unsigned NSIS installer with `--publish never`. It runs for main pushes, pull requests and manual dispatch. Build jobs have read-only repository permission. For the authorized 0.6.1 release, a separate main-only job verifies checksums, creates a draft at the exact source commit, uploads assets and then publishes. Existing releases are not overwritten; PR runs cannot publish.
+
+The runtime pin contains a historical native watcher assertion on the hosted runner; local Node 24.20 checks passed and did not reproduce it. See [BUILD_VERIFICATION.md](BUILD_VERIFICATION.md) before upgrading. A passing local build is not evidence of a remote CI pass.
 
 ## Release checklist
 

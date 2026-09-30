@@ -8,7 +8,7 @@ These tests run without opening the companion, registering global shortcuts, sca
 
 | Command | Result |
 | --- | --- |
-| `node tests/test-simulations.mjs` | 11 simulation scenarios pass |
+| `node tests/test-simulations.mjs` | 13 simulation scenarios pass |
 | `npm test` | Includes the simulation suite alongside the five existing suites |
 
 ## New scenarios
@@ -37,6 +37,9 @@ Duplicate stopped notifications previously cleared the pending game-exit timer w
 
 ## What still requires installed testing
 
-The latest source is newer than installed version 0.5.1. Rebuild, reinstall and verify character choice, journey isolation, search, map actions, overlay interaction, both real global shortcuts, persistence and update checks after the user permits visible testing. Synthetic tests do not substitute for these acceptance checks.
-
-Full pickup/drop completeness is also not established. See [LOCAL_KNOWLEDGE.md](LOCAL_KNOWLEDGE.md) for the 14,481 local records and known extraction gaps.
+Fresh installed/native-window acceptance remains separate from synthetic tests.
+Verify character choice, journey isolation, search, maps, persistence and update
+checks with disposable companion data before relying on a new installation.
+No overlay or global hotkeys are present. Real-save/gameplay testing was not
+repeated for 0.6.1. Optional imported catalogs are not bundled and their coverage
+is not guaranteed; see [LOCAL_KNOWLEDGE.md](LOCAL_KNOWLEDGE.md).

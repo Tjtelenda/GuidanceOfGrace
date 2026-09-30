@@ -28,7 +28,7 @@ GPL-3.0. Consulted as a save-format research source for factual PlayerGameData o
 
 `egormagurin/EldenRingMap` and `jw-ofs/elden-ring-map` were reviewed for feature/data architecture. Their licenses and asset provenance must be verified before code/assets are copied. Current Guidance of Grace source does not vendor their map tiles.
 
-On this computer only, `egormagurin/EldenRingMap` commit `48f42e570ada1dd28717d7ce56aaeb92ee14521b` was used as a local extraction tool. The reviewed repository had no standalone redistribution license file. Its code, Python dependencies, decoded game data and tiles are excluded from this repository and installer. Only the independently authored JSON adapter and local-runner interface are distributed. Do not distribute `.local-tools` or the user's knowledge/maps cache.
+Optional extraction tools, decoded game data and maps are not distributed. Only the independently authored JSON adapter and local-runner interface are included. Never distribute private tooling or user caches.
 
 ERDB (`EldenRingDatabase/erdb`, MIT) was evaluated as an alternative structured-data generator. It requires an unpacked input workflow. No ERDB code or assets are copied here. The chosen local extractor can read installed archives directly without unpacking into the game folder.
 

@@ -7,8 +7,7 @@
 
 Unsigned Windows x64 installer. Automated suites and packaging must pass before
 publication. Fresh installed/native-window acceptance and real-save gameplay
-were not repeated. The historical Node 24.20 watcher assertion remains
-unreproduced; the runtime pin is containment, not a root-cause fix.
+were not repeated. The native watcher assertion also reproduced on hosted Node 24.19.0. Watch directories now use canonical paths, avoiding Windows short-path mismatches; this is an application workaround, not a Node/libuv patch.
 
 We are improving the application as we use it more. Bug reports and update
 suggestions: tjtelendallc@gmail.com. Existing 0.6.0 downloads remain unchanged.

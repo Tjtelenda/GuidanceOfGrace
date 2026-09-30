@@ -1,4 +1,4 @@
-# Build and verification â€” 0.6.0 source
+# Build and verification �?" 0.6.0 source
 
 ## Local review, 2026-09-30
 
@@ -50,3 +50,8 @@ The Electron and Chromium notice files were retained. The installer was not
 run against an existing installation. Hosted checks and release assets must
 be verified for the exact 0.6.1 source commit; the historical 0.6.0 hashes above
 do not identify this new build.
+
+## Hosted follow-up
+
+Run 36683757738 reproduced the native watcher assertion on Node 24.19.0, disproving runtime pinning alone as containment. The watcher now resolves its directory with realpathSync.native before fs.watch, while retaining the original save binding. The synthetic watcher regression requires an actual filesystem notification without manual scheduling. The upstream libuv Windows implementation documents short-directory-path mismatches in uv__relative_path; this patch avoids passing those paths, rather than changing libuv. Exact-commit hosted results remain the release gate.
+

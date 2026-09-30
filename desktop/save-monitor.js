@@ -193,7 +193,10 @@ export class SaveMonitor {
     if(filePath&&!/\.(sl2|co2)$/i.test(filePath))throw new Error('Choose a .sl2 or .co2 game save.');
     this.filePath = filePath;
     if (!filePath || !fs.existsSync(filePath)) return;
-    this.watcher = fs.watch(path.dirname(filePath), { persistent: false }, (_event,name) => {
+    // Expand Windows short paths before libuv compares notification paths.
+    // Keep filePath itself unchanged for the user's existing save binding.
+    const watchDirectory = fs.realpathSync.native(path.dirname(filePath));
+    this.watcher = fs.watch(watchDirectory, { persistent: false }, (_event,name) => {
       if(!name||String(name).toLowerCase()===path.basename(filePath).toLowerCase())this.schedule();
     });
     this.watcher.on('error',this.onError);

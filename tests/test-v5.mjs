@@ -44,7 +44,21 @@ try {
   assert.deepEqual(readBlessingLevels(fixture,0),{scaduLevel:10,spiritBlessingLevel:5});fixture[player+245]=11;assert.equal(readBlessingLevels(fixture,0).scaduLevel,null);assert.equal(playerGameDataOffset(fixture,10),null);
   // A synthetic companion-owned fixture only: never write a user's game save.
   const fake=path.join(dir,'synthetic.co2');fs.writeFileSync(fake,'fixture');let reads=0;
-  const monitor=new SaveMonitor(()=>reads++,{parseFile:async()=>[],debounceMs:20,stableMs:5});monitor.watch(fake);await pause(60);reads=0;fs.appendFileSync(fake,'changed');monitor.schedule();monitor.schedule();monitor.schedule();await pause(70);assert.equal(reads,1);monitor.stop();
+  const monitor=new SaveMonitor(()=>reads++,{parseFile:async()=>[],debounceMs:20,stableMs:5});
+  const nativeWatch=fs.watch;let watchedDirectory;
+  fs.watch=(directory,...args)=>{watchedDirectory=directory;return nativeWatch(directory,...args)};
+  try {monitor.watch(fake);} finally {fs.watch=nativeWatch;}
+  try {
+    assert.equal(watchedDirectory,fs.realpathSync.native(dir),'watch canonical directory even when TEMP uses a Windows short path');
+    for(let i=0;i<100&&reads===0;i++)await pause(20);
+    assert.equal(reads,1,'initial snapshot arrives');reads=0;
+    fs.appendFileSync(fake,'changed');
+    // Do not schedule manually: a real filesystem event must deliver the update.
+    for(let i=0;i<100&&reads===0;i++)await pause(20);
+    assert.equal(reads,1,'native watcher detects the synthetic write');
+    monitor.schedule();monitor.schedule();monitor.schedule();await pause(70);
+    assert.equal(reads,1,'duplicate schedules suppress unchanged snapshots');
+  } finally {monitor.stop();}
   const sequence=[];const lifecycle=new GameLifecycle({delay:10,readFinal:async()=>{await pause(5);sequence.push('read')},onClose:()=>sequence.push('close')});lifecycle.change(true);lifecycle.change(false);await pause(40);assert.deepEqual(sequence,['read','close']);lifecycle.stop();
   console.log('PASS: V5 catalog/search, journey isolation/export/import, update rollback/offline, structural blessing bounds, watcher debounce and final read.');
 } finally {fs.rmSync(dir,{recursive:true,force:true});}

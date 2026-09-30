@@ -51,10 +51,9 @@ We are continuing to improve Guidance of Grace as we use it more. The limits
 above remain: optional extracted catalogs and maps are not bundled, save
 flags do not prove every dialogue step, and broader quest coverage, long
 sessions, and game-exit timing still need real-use verification. The historical
-Windows CI watcher failure was not reproduced locally; the supported Node
-24.19.0 pin is containment, not a claim that its root cause is resolved.
+Windows CI watcher assertion also occurred under Node 24.19.0. The watcher now canonicalizes directory paths before calling libuv; hosted checks qualify this workaround.
 
-Version 0.6.1 packages the supported runtime/CI updates, clearer setup documentation and original-code MIT license. It does not claim new quest coverage or a root-cause repair to the historical Node watcher failure. See [verification](BUILD_VERIFICATION.md) for exact tests and limits.
+Version 0.6.1 packages the supported runtime/CI updates, clearer setup documentation and original-code MIT license. It includes a canonical-path workaround for the Windows watcher assertion, not a change to Node/libuv itself or new quest coverage. See [verification](BUILD_VERIFICATION.md) for exact tests and limits.
 
 Send bug reports or update suggestions to
 [tjtelendallc@gmail.com](mailto:tjtelendallc@gmail.com). Include your app
